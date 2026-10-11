@@ -93,6 +93,7 @@ class LLMConfig(BaseModel):
     model: str = ""
     auth_style: str = ""  # "bearer" | "api-key" — resolved from provider if blank
     max_tokens: int = 4096
+    omit_max_tokens: bool = False  # Skip token cap in outgoing API calls when enabled.
     temperature: float = 0.7
     top_p: float = 0.9
     timeout: int = 120
