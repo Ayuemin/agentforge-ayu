@@ -346,49 +346,39 @@ def size_label(n: int) -> str:
 
 
 def cleanup_menu() -> None:
+    """General storage maintenance; Android Downloads are never touched."""
     cfg.RUNS.mkdir(parents=True, exist_ok=True)
     while True:
         dirs = sorted((d for d in cfg.RUNS.iterdir() if d.is_dir()), reverse=True)
-        legacy = cfg.RUNS.parent
-        legacy_files = sorted(
-            list(legacy.glob("*_article.md")) + list(legacy.glob("*_publisher.json"))
-        )
-        old_cache = cfg.RUNS.parent.parent / ".cache"
-        cache_size = folder_size(cfg.CACHE) + folder_size(old_cache)
+        cache_size = folder_size(cfg.CACHE)
         runs_size = folder_size(cfg.RUNS)
         say(f"\nИстория: {len(dirs)} запусков, {size_label(runs_size)}")
         say(f"Кэш: {size_label(cache_size)}. Копии в Android загрузках НЕ удаляются.")
-        pick = choose("Очистка памяти", [
+        pick = choose("Хранилище", [
             "Очистить временный кэш",
-            "Удалить старые запуски, оставить последние N",
-            "Удалить все сохранённые запуски",
-            "Удалить статьи прежней версии из Linux",
+            "Освободить место: оставить последние N запусков",
+            "Удалить всю историю запусков",
             "Назад"])
         if pick == 1:
             if ask("Для очистки кэша введи ДА") == "ДА":
                 shutil.rmtree(cfg.CACHE, ignore_errors=True)
-                shutil.rmtree(old_cache, ignore_errors=True)
                 say("Кэш очищен.")
-        elif pick == 4:
-            old_metrics = list((legacy / "metrics").glob("*.json")) if (legacy / "metrics").is_dir() else []
-            victims = legacy_files + old_metrics
-            say(f"Старых файлов: {len(victims)}; размер: {size_label(sum(folder_size(p) for p in victims))}.")
-            say("Результаты новых запусков и Android Загрузки не удаляются.")
-            if victims and ask("Для удаления введи УДАЛИТЬ") == "УДАЛИТЬ":
-                for file in victims:
-                    if file.is_file() and not file.is_symlink():
-                        file.unlink()
-                say("Старые файлы удалены из Linux.")
         elif pick in (2, 3):
-            keep = 0 if pick == 3 else number("Сколько последних запусков оставить", 5, int, 0, 100000)
+            try:
+                keep = 0 if pick == 3 else number(
+                    "Сколько последних запусков оставить", 5, int, 0, 100000
+                )
+            except ValueError as error:
+                say(f"Ошибка: {error}")
+                continue
             victims = dirs[keep:]
-            bytes_to_remove = sum(folder_size(x) for x in victims)
+            bytes_to_remove = sum(folder_size(directory) for directory in victims)
             say(f"Будет удалено папок: {len(victims)}; размер: {size_label(bytes_to_remove)}.")
             if victims and ask("Для удаления введи УДАЛИТЬ") == "УДАЛИТЬ":
                 for directory in victims:
                     if directory.parent == cfg.RUNS and not directory.is_symlink():
                         shutil.rmtree(directory)
-                say("Старые результаты удалены из Linux.")
+                say("Выбранные результаты удалены из Linux.")
         else:
             return
 
@@ -562,7 +552,7 @@ def system_menu(s: dict) -> None:
             "Проверить ключ (без генерации)",
             "Копировать настройки в файл JSON",
             "Включить / выключить копию статьи в Загрузках",
-            "Очистка кэша и статей",
+            "Хранилище (кэш и история)",
             "Вернуть настройки по умолчанию",
             "Назад"])
         if pick == 1:
