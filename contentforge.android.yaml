@@ -1,0 +1,19 @@
+# Android / Termux + Ubuntu profile for ContentForge.
+# No secrets are stored here. Set OPENROUTER_API_KEY in your shell.
+llm:
+  provider: openrouter
+  model: deepseek/deepseek-v4.1-flash
+  omit_max_tokens: true
+  temperature: 0.7
+  top_p: 0.9
+
+pipeline:
+  target_word_count: 1500
+  language: ru
+  output_format: markdown
+  seo_enabled: true
+  quality_threshold: 0.8
+  max_iterations: 3
+  enable_translation: false
+
+output_dir: ./output
