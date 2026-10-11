@@ -12,14 +12,12 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 
 import httpx
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 from . import terminal_settings as cfg
 from .terminal_search import gather, report_to_json
@@ -314,8 +312,7 @@ def advanced_menu(s: dict) -> None:
                     parsed = json.loads(custom)
                     if not isinstance(parsed, dict):
                         raise ValueError("Требуется JSON-объект")
-                    draft = dict(s, extra=parsed)
-                    # Validate config without requiring API key.
+                        # Validate config without requiring API key.
                     forbidden = {"model", "messages", "tools", "plugins", "stream",
                                  "temperature", "max_tokens", "top_p"}
                     if forbidden.intersection(parsed):
@@ -352,7 +349,12 @@ def cleanup_menu() -> None:
     cfg.RUNS.mkdir(parents=True, exist_ok=True)
     while True:
         dirs = sorted((d for d in cfg.RUNS.iterdir() if d.is_dir()), reverse=True)
-        cache_size = folder_size(cfg.CACHE)
+        legacy = cfg.RUNS.parent
+        legacy_files = sorted(
+            list(legacy.glob("*_article.md")) + list(legacy.glob("*_publisher.json"))
+        )
+        old_cache = cfg.RUNS.parent.parent / ".cache"
+        cache_size = folder_size(cfg.CACHE) + folder_size(old_cache)
         runs_size = folder_size(cfg.RUNS)
         say(f"\nИстория: {len(dirs)} запусков, {size_label(runs_size)}")
         say(f"Кэш: {size_label(cache_size)}. Копии в Android загрузках НЕ удаляются.")
@@ -360,11 +362,23 @@ def cleanup_menu() -> None:
             "Очистить временный кэш",
             "Удалить старые запуски, оставить последние N",
             "Удалить все сохранённые запуски",
+            "Удалить статьи прежней версии из Linux",
             "Назад"])
         if pick == 1:
             if ask("Для очистки кэша введи ДА") == "ДА":
                 shutil.rmtree(cfg.CACHE, ignore_errors=True)
+                shutil.rmtree(old_cache, ignore_errors=True)
                 say("Кэш очищен.")
+        elif pick == 4:
+            old_metrics = list((legacy / "metrics").glob("*.json")) if (legacy / "metrics").is_dir() else []
+            victims = legacy_files + old_metrics
+            say(f"Старых файлов: {len(victims)}; размер: {size_label(sum(folder_size(p) for p in victims))}.")
+            say("Результаты новых запусков и Android Загрузки не удаляются.")
+            if victims and ask("Для удаления введи УДАЛИТЬ") == "УДАЛИТЬ":
+                for file in victims:
+                    if file.is_file() and not file.is_symlink():
+                        file.unlink()
+                say("Старые файлы удалены из Linux.")
         elif pick in (2, 3):
             keep = 0 if pick == 3 else number("Сколько последних запусков оставить", 5, int, 0, 100000)
             victims = dirs[keep:]
