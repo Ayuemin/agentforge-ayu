@@ -16,4 +16,8 @@ pipeline:
   max_iterations: 3
   enable_translation: false
 
+agents:
+  - name: editor
+    model_override: anthropic/claude-opus-5.5
+
 output_dir: ./output
