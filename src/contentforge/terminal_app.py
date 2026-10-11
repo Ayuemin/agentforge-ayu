@@ -55,7 +55,7 @@ def number(message: str, previous, cast=int, lower=None, upper=None):
 
 def editor(label: str, initial: str = "") -> str | None:
     """Launch full-screen editor if available; fallback to multi-line input."""
-    program = shutil.which("nano") or shutil.which("vi")
+    program = shutil.which("nano")
     if program:
         with tempfile.TemporaryDirectory(prefix="forge-editor-") as directory:
             destination = Path(directory) / "draft.txt"
@@ -189,3 +189,191 @@ def pipeline_menu(s: dict) -> None:
             cfg.save(s)
         except ValueError as error:
             say(f"Ошибка: {error}")
+
+
+def search_menu(s: dict) -> None:
+    while True:
+        q = s["search"]
+        say(f"\nПоиск: {'ВКЛ' if q['enabled'] else 'ВЫКЛ'}"
+            f" · максимум {q['calls']} запросов · {q['results']} результатов"
+            f" · движок: {q['engine']}")
+        pick = choose("Интернет и источники", [
+            "Включить / выключить",
+            "Сколько поисковых запросов разрешено",
+            "Сколько результатов на запрос",
+            "Движок: автоматически / бесплатный / OpenRouter",
+            "Назад"])
+        try:
+            if pick == 1:
+                q["enabled"] = not q["enabled"]
+            elif pick == 2:
+                q["calls"] = number("Максимум запросов", q["calls"], int, 0, 30)
+            elif pick == 3:
+                q["results"] = number("Результатов на запрос", q["results"], int, 1, 10)
+            elif pick == 4:
+                index = choose("Поисковый движок", [
+                    "Авто: бесплатный Bing RSS, при сбое — OpenRouter",
+                    "Только бесплатный Bing RSS",
+                    "OpenRouter (платный веб-поиск)"])
+                if index:
+                    q["engine"] = ["auto", "free", "openrouter"][index - 1]
+            else:
+                return
+            cfg.save(s)
+        except ValueError as err:
+            say(f"Ошибка: {err}")
+
+
+def prompt_menu(s: dict) -> None:
+    from .agents import AGENT_REGISTRY
+    import inspect
+    while True:
+        index = choose("Промпты агентов", list(cfg.LABELS) + ["Назад"])
+        if not index or index > len(cfg.AGENTS):
+            return
+        name = cfg.AGENTS[index - 1]
+        cls = AGENT_REGISTRY[name]
+        while True:
+            selection = choose(f"Промпты — {cfg.LABELS[index - 1]}", [
+                "Посмотреть оригинальный системный промпт",
+                "Посмотреть оригинальный шаблон задания (исходный код)",
+                "Редактировать свой системный промпт",
+                "Дополнительные инструкции к заданию",
+                "Восстановить оригинальные промпты",
+                "Назад"])
+            if selection == 1:
+                console.print(Panel(cls.system_prompt, title="Оригинальный system prompt"))
+            elif selection == 2:
+                raw = inspect.getsource(cls.execute)
+                pos = raw.find('prompt = f"""')
+                if pos >= 0:
+                    end = raw.find('"""', pos + len('prompt = f"""'))
+                    console.print(Panel(raw[pos + len('prompt = f"""'):end],
+                                        title="Оригинальный user template"))
+                else:
+                    say("Шаблон в этом агенте формируется иначе; смотри исходник.")
+            elif selection == 3:
+                current = s["prompts"].get(name, cls.system_prompt)
+                updated = editor("Системный промпт", current)
+                if updated is not None and updated.strip():
+                    s["prompts"][name] = updated
+                    cfg.save(s)
+                    say("Системный промпт сохранён отдельно от исходника.")
+            elif selection == 4:
+                updated = editor("Дополнительные инструкции к шаблону",
+                                 s["user_instructions"].get(name, ""))
+                if updated is not None:
+                    if updated.strip():
+                        s["user_instructions"][name] = updated
+                    else:
+                        s["user_instructions"].pop(name, None)
+                    cfg.save(s)
+            elif selection == 5:
+                if ask("Введите СБРОС для восстановления", "") == "СБРОС":
+                    s["prompts"].pop(name, None)
+                    s["user_instructions"].pop(name, None)
+                    cfg.save(s)
+            else:
+                break
+
+
+def advanced_menu(s: dict) -> None:
+    while True:
+        pick = choose("Расширенные настройки", [
+            f"Температура: {s['temperature']}",
+            f"Top-p: {s['top_p']}",
+            f"Reasoning: {s['reasoning']}",
+            f"Лимит ответа: {'не передавать' if s['uncapped'] else s['max_tokens']}",
+            f"Тайм-аут API: {s['timeout']} секунд",
+            f"Повторных попыток: {s['retries']}",
+            "Дополнительные параметры OpenRouter (JSON)",
+            "Статья и конвейер",
+            "Назад"])
+        try:
+            if pick == 1:
+                s["temperature"] = number("Температура", s["temperature"], float, 0, 2)
+            elif pick == 2:
+                s["top_p"] = number("Top-p", s["top_p"], float, 0, 1)
+            elif pick == 3:
+                index = choose("Уровень рассуждений", [
+                    "auto — не передавать", "none", "minimal", "low", "medium", "high", "xhigh"])
+                if index:
+                    s["reasoning"] = ["auto", "none", "minimal", "low", "medium", "high", "xhigh"][index - 1]
+            elif pick == 4:
+                s["uncapped"] = not s["uncapped"]
+                if not s["uncapped"]:
+                    s["max_tokens"] = number("Лимит выходных токенов", s["max_tokens"], int, 16, 200000)
+            elif pick == 5:
+                s["timeout"] = number("Тайм-аут", s["timeout"], int, 10, 3600)
+            elif pick == 6:
+                s["retries"] = number("Попыток всего", s["retries"], int, 1, 10)
+            elif pick == 7:
+                custom = editor("Дополнительные параметры OpenRouter",
+                                json.dumps(s["extra"], ensure_ascii=False, indent=2))
+                if custom is not None:
+                    parsed = json.loads(custom)
+                    if not isinstance(parsed, dict):
+                        raise ValueError("Требуется JSON-объект")
+                    draft = dict(s, extra=parsed)
+                    # Validate config without requiring API key.
+                    forbidden = {"model", "messages", "tools", "plugins", "stream",
+                                 "temperature", "max_tokens", "top_p"}
+                    if forbidden.intersection(parsed):
+                        raise ValueError("Эти поля управляются отдельными настройками")
+                    s["extra"] = parsed
+            elif pick == 8:
+                pipeline_menu(s)
+            else:
+                return
+            cfg.save(s)
+        except (ValueError, json.JSONDecodeError) as err:
+            say(f"Ошибка: {err}")
+
+
+def folder_size(directory: Path) -> int:
+    if directory.is_file():
+        return directory.stat().st_size
+    total = 0
+    if directory.exists():
+        for file in directory.rglob("*"):
+            try:
+                if file.is_file() and not file.is_symlink():
+                    total += file.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def size_label(n: int) -> str:
+    return f"{n / 1048576:.1f} МБ"
+
+
+def cleanup_menu() -> None:
+    cfg.RUNS.mkdir(parents=True, exist_ok=True)
+    while True:
+        dirs = sorted((d for d in cfg.RUNS.iterdir() if d.is_dir()), reverse=True)
+        cache_size = folder_size(cfg.CACHE)
+        runs_size = folder_size(cfg.RUNS)
+        say(f"\nИстория: {len(dirs)} запусков, {size_label(runs_size)}")
+        say(f"Кэш: {size_label(cache_size)}. Копии в Android загрузках НЕ удаляются.")
+        pick = choose("Очистка памяти", [
+            "Очистить временный кэш",
+            "Удалить старые запуски, оставить последние N",
+            "Удалить все сохранённые запуски",
+            "Назад"])
+        if pick == 1:
+            if ask("Для очистки кэша введи ДА") == "ДА":
+                shutil.rmtree(cfg.CACHE, ignore_errors=True)
+                say("Кэш очищен.")
+        elif pick in (2, 3):
+            keep = 0 if pick == 3 else number("Сколько последних запусков оставить", 5, int, 0, 100000)
+            victims = dirs[keep:]
+            bytes_to_remove = sum(folder_size(x) for x in victims)
+            say(f"Будет удалено папок: {len(victims)}; размер: {size_label(bytes_to_remove)}.")
+            if victims and ask("Для удаления введи УДАЛИТЬ") == "УДАЛИТЬ":
+                for directory in victims:
+                    if directory.parent == cfg.RUNS and not directory.is_symlink():
+                        shutil.rmtree(directory)
+                say("Старые результаты удалены из Linux.")
+        else:
+            return
