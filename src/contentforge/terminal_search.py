@@ -66,7 +66,6 @@ def openrouter_search(client: httpx.Client, query: str, limit: int,
                  "Never invent URLs. Respond in concise Russian.\nТема: " + query}
             ],
             "plugins": [{"id": "web", "max_results": limit}],
-            "max_tokens": 800,
         },
         timeout=100,
     )
