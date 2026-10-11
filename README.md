@@ -16,6 +16,48 @@
 - Обслуживание файлов спрятано внутри **«Система → Хранилище»**: очистка временного кэша и управление числом сохранённых запусков. Копии в Android «Загрузках» при очистке не затрагиваются.
 - Просмотр промптов, свои системные инструкции и дополнительные инструкции к заданиям. **Исходный шаблон задания пока доступен только для просмотра**, а не для прямого редактирования; это ещё не полноценный редактор обоих типов промптов.
 
+## Если AgentForge уже установлен в Ubuntu
+
+Повторно скачивать Ubuntu не нужно. Этот способ подходит для прежней установки `agentforge-ayu` из ветки `work/android-deepseek-ru-no-token-limits`.
+
+**В обычном Termux:**
+
+```sh
+proot-distro login ubuntu
+```
+
+**В Ubuntu:**
+
+```sh
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+cd /root/agentforge-ayu
+git status --short
+```
+
+Продолжай, **только если `git status --short` ничего не вывел**:
+
+```sh
+git fetch origin work/termux-terminal-app:refs/remotes/origin/work/termux-terminal-app
+git switch --track origin/work/termux-terminal-app
+apt update
+apt install -y nano
+. .venv/bin/activate
+python -m pip install --only-binary=:all: -e .
+exit
+```
+
+Снова в **обычном Termux**:
+
+```sh
+curl -fL https://raw.githubusercontent.com/Ayuemin/agentforge-ayu/work/termux-terminal-app/scripts/install-forge-termux.sh -o "$HOME/install-forge-termux.sh"
+sh "$HOME/install-forge-termux.sh"
+forge
+```
+
+Если API-ключ раньше был задан только временной командой `export OPENROUTER_API_KEY`, внеси его в «Система» в новом интерфейсе. Это сохраняет ключ между запусками.
+
+---
+
 ## Установка с нуля (чистый Termux)
 
 Установи актуальный **Termux из F-Droid или официальных релизов GitHub**. Понадобятся интернет, свободное место для Ubuntu и разрешение на доступ к памяти телефона. Не смешивай APK Termux и его плагинов из разных источников.
