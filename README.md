@@ -16,37 +16,56 @@
 - Обслуживание файлов спрятано внутри **«Система → Хранилище»**: очистка временного кэша и управление числом сохранённых запусков. Копии в Android «Загрузках» при очистке не затрагиваются.
 - Просмотр промптов, свои системные инструкции и дополнительные инструкции к заданиям. **Исходный шаблон задания пока доступен только для просмотра**, а не для прямого редактирования; это ещё не полноценный редактор обоих типов промптов.
 
-## Если AgentForge уже установлен в Ubuntu
+## Если AgentForge уже установлен (без переустановки Termux)
 
-Повторно скачивать Ubuntu не нужно. Этот способ подходит для прежней установки `agentforge-ayu` из ветки `work/android-deepseek-ru-no-token-limits`.
+**Важно:** установка команды `forge` создаёт только ярлык запуска. Она **не скачивает новое меню в Ubuntu**, **не переключает Git-ветку** и не обновляет Python-пакет. Если ярлык установлен раньше обновления проекта, получится ошибка `No module named contentforge.terminal_app`.
 
-**В обычном Termux:**
+Обновляй в следующем порядке: **код AgentForge → Python-пакет → проверка меню → команда `forge`**.
+
+**1. В обычном Termux** (`~ $`) войди в Ubuntu:
 
 ```sh
 proot-distro login ubuntu
 ```
 
-**В Ubuntu:**
+**2. В Ubuntu** (`root@localhost`) проверь рабочее дерево и ветку:
 
 ```sh
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+hash -r
 cd /root/agentforge-ayu
 git status --short
+git branch --show-current
 ```
 
-Продолжай, **только если `git status --short` ничего не вывел**:
+Если `git status --short` вывел изменения, **остановись и проверь их**: не переключай ветку, чтобы не затереть собственные правки. Если вывод пустой, продолжай:
 
 ```sh
 git fetch origin work/termux-terminal-app:refs/remotes/origin/work/termux-terminal-app
 git switch --track origin/work/termux-terminal-app
+```
+
+Команда `git switch --track` нужна **только при первом переходе** со старой ветки. Если ответ `fatal: a branch named 'work/termux-terminal-app' already exists`, вместо неё выполни `git switch work/termux-terminal-app`. Для следующих обновлений уже этой ветки достаточно `git pull --ff-only`.
+
+**3. В Ubuntu** установи обновлённый пакет и проверь наличие меню:
+
+```sh
 apt update
 apt install -y nano
 . .venv/bin/activate
 python -m pip install --only-binary=:all: -e .
+python -c "import contentforge.terminal_app; print('AgentForge OK')"
+```
+
+Ожидаемый результат проверки — `AgentForge OK`. Если получена ошибка, **не переходи к запуску платной генерации**: сначала разберись с обновлением.
+
+Выйди из Ubuntu (после активации venv команда `exit` завершает текущую оболочку Ubuntu):
+
+```sh
 exit
 ```
 
-Снова в **обычном Termux**:
+**4. Снова в обычном Termux** установи или переустанови короткую команду:
 
 ```sh
 curl -fL https://raw.githubusercontent.com/Ayuemin/agentforge-ayu/work/termux-terminal-app/scripts/install-forge-termux.sh -o "$HOME/install-forge-termux.sh"
@@ -54,7 +73,7 @@ sh "$HOME/install-forge-termux.sh"
 forge
 ```
 
-Если API-ключ раньше был задан только временной командой `export OPENROUTER_API_KEY`, внеси его в «Система» в новом интерфейсе. Это сохраняет ключ между запусками.
+Теперь в дальнейшем используй одну команду — `forge`. Если API-ключ раньше был задан только временной командой `export OPENROUTER_API_KEY`, открой «Система» и сохрани его для следующих запусков.
 
 ---
 
@@ -162,6 +181,7 @@ exit
 | Проблема | Что делать |
 | --- | --- |
 | `forge: command not found` | Выполни шаг 3 именно **в обычном Termux**, не в Ubuntu |
+| `No module named contentforge.terminal_app` | Команда `forge` установлена, но в Ubuntu осталась старая ветка. Выполни весь раздел **«Если AgentForge уже установлен»**: переключение ветки, `pip install` и проверку импорта. Одной переустановки ярлыка недостаточно |
 | `proot-distro: command not found` | В обычном Termux: `pkg install proot-distro` |
 | Python не может импортировать `_posixsubprocess` | В Ubuntu восстанови `PATH` как в шаге 2, используй `/usr/bin/python3` |
 | Нет статей в Android «Загрузках» | В обычном Termux выполни `termux-setup-storage`, разреши доступ; убедись, что доступен `/sdcard/Download` |
