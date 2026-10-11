@@ -86,6 +86,10 @@ class BaseAgent(ABC):
         if context:
             messages.append(ChatMessage(role="user", content=f"Context:\n{context}"))
 
+        if self._agent_config.user_prompt_addition:
+            user_prompt += "\n\nДополнительные инструкции редакционного профиля:\n" + (
+                self._agent_config.user_prompt_addition
+            )
         messages.append(ChatMessage(role="user", content=user_prompt))
 
         start = time.monotonic()
@@ -94,7 +98,8 @@ class BaseAgent(ABC):
                 messages,
                 model=self._agent_config.model_override,
                 temperature=temperature or self._agent_config.temperature_override,
-                max_tokens=max_tokens or self._agent_config.max_tokens_override,
+                max_tokens=max_tokens if max_tokens is not None else self._agent_config.max_tokens_override,
+                reasoning_effort=self._agent_config.reasoning_effort_override,
             )
             latency = (time.monotonic() - start) * 1000
 
