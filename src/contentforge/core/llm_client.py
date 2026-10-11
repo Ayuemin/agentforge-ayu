@@ -111,11 +111,12 @@ class LLMClient:
         payload = {
             "model": model or self.config.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature or self.config.temperature,
             "top_p": self.config.top_p,
             "stream": stream,
         }
+        if not self.config.omit_max_tokens:
+            payload["max_tokens"] = max_tokens or self.config.max_tokens
 
         start = time.monotonic()
 
@@ -217,11 +218,12 @@ class LLMClient:
         payload = {
             "model": model or self.config.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature or self.config.temperature,
             "top_p": self.config.top_p,
             "stream": True,
         }
+        if not self.config.omit_max_tokens:
+            payload["max_tokens"] = max_tokens or self.config.max_tokens
 
         async with self._client.stream("POST", "/chat/completions", json=payload) as resp:
             resp.raise_for_status()
