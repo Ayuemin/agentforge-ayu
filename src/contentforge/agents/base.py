@@ -74,7 +74,14 @@ class BaseAgent(ABC):
         max_tokens: Optional[int] = None,
     ) -> ChatResponse:
         """Make a call to MiMo API with the agent's system prompt."""
-        messages = [ChatMessage(role="system", content=self.effective_system_prompt)]
+        system_content = self.effective_system_prompt
+        if self.name != "translator" and self.config.pipeline.language == "ru":
+            system_content += (
+                "\n\nOutput language: Russian (ru). Use natural Russian for all prose "
+                "and JSON string values. Preserve the required JSON field names, "
+                "code snippets, and technical identifiers."
+            )
+        messages = [ChatMessage(role="system", content=system_content)]
 
         if context:
             messages.append(ChatMessage(role="user", content=f"Context:\n{context}"))
