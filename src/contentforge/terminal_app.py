@@ -377,3 +377,264 @@ def cleanup_menu() -> None:
                 say("Старые результаты удалены из Linux.")
         else:
             return
+
+
+def clean_article(value: str) -> str:
+    """Keep only article text, never publisher JSON, scores or editor comments."""
+    value = re.sub(r"<!--[\s\S]*?-->", "", value)
+    value = re.sub(r"\A---\n[\s\S]*?\n---\n", "", value)
+    return value.strip() + "\n"
+
+
+def download_article(article: Path, topic: str) -> Path | None:
+    """Copy without modifying the Linux original."""
+    name = re.sub(r"[^\wа-яА-Я-]+", "_", topic, flags=re.UNICODE).strip("_")[:48]
+    name = name or "statya"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for folder in (
+        Path("/sdcard/Download"),
+        Path("/storage/emulated/0/Download"),
+        Path("/data/data/com.termux/files/home/storage/downloads"),
+    ):
+        if folder.is_dir():
+            dest = folder / (f"AgentForge_{stamp}_{name}.md")
+            try:
+                shutil.copyfile(article, dest)
+                return dest
+            except OSError:
+                continue
+    return None
+
+
+class StageDisplay(logging.Handler):
+    stages = {
+        "Research": "Исследование",
+        "Outline": "План статьи",
+        "Writer": "Написание",
+        "SEO": "SEO-анализ",
+        "Editor": "Редактура",
+        "Quality": "Контроль качества",
+        "Translation": "Перевод",
+        "Publisher": "Сохранение",
+    }
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if "[Pipeline] Step" in message:
+            for stage, name in self.stages.items():
+                if f": {stage}" in message:
+                    say("➜ " + name + (" — повторный проход" if "iteration 2" in message
+                                             or "iteration 3" in message else ""))
+                    break
+
+
+def run_article(s: dict) -> None:
+    from .pipeline.orchestrator import PipelineOrchestrator
+
+    topic = topic_input()
+    if not topic:
+        say("Пустое задание. Запуск отменён.")
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    folder = cfg.RUNS / stamp
+    effective = [s["models"].get(n, s["model"]) if s["mode"] == "per_agent"
+                 else s["model"] for n in cfg.AGENTS]
+    say("\nПРОВЕРКА ПЕРЕД ЗАПУСКОМ")
+    say(f"Задание: {topic[:550]}")
+    if len(set(effective)) == 1:
+        say(f"Модель на всех этапах: {effective[0]}")
+    else:
+        for name, model in zip(cfg.LABELS, effective):
+            say(f"  {name}: {model}")
+    search = s["search"]
+    say(f"Поиск: до {search['calls']} запросов" if search["enabled"] else "Поиск: выключен")
+    say(f"Язык: {s['pipeline']['language']} · до {s['pipeline']['passes']} проходов редактора")
+    say("API и запасной платный поиск могут списывать средства OpenRouter.")
+    if ask("Начать? (да/нет)", "нет").lower() not in {"да", "д", "yes", "y"}:
+        say("Отменено. Платных запросов не было.")
+        return
+    config = cfg.make_config(s, folder)
+    folder.mkdir(parents=True, exist_ok=False)
+    (folder / "settings.json").write_text(
+        json.dumps({k: v for k, v in s.items() if k != "api_key"},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    (folder / "topic.txt").write_text(topic, encoding="utf-8")
+    say("\nИщу источники…")
+    report = gather(topic, s, config.llm.api_key, announce=say)
+    (folder / "sources.json").write_text(report_to_json(report), encoding="utf-8")
+    listing = []
+    for i, source in enumerate(report.sources, 1):
+        listing.append(f"{i}. {source['title']}\n{source['url']}\n{source['excerpt']}\n")
+    (folder / "sources.md").write_text(
+        "# Собранные материалы\n\n" + "\n".join(listing), encoding="utf-8")
+    say(f"Источников: {len(report.sources)}. Платных поисковых запросов: {report.paid_calls}")
+    if report.problems:
+        say("Предупреждения поиска: " + "; ".join(report.problems[:4]))
+    if search["enabled"] and not report.sources:
+        if ask("Источников нет. Писать без них? (да/нет)", "нет").lower() != "да":
+            say("Остановлено до запуска агентов.")
+            return
+    say("\nЗапущен конвейер агентов. Это может занять несколько минут.")
+    handler = StageDisplay()
+    logger = logging.getLogger("contentforge.pipeline.orchestrator")
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        result = asyncio.run(PipelineOrchestrator(config).run(
+            topic=topic, research_context=report.text))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    if not result.ok:
+        say("Конвейер завершился с ошибкой. Уже созданные файлы сохранены:")
+        say(str(folder))
+        return
+
+    article_file = folder / "СТАТЬЯ.md"
+    article_file.write_text(clean_article(result.article), encoding="utf-8")
+    say("\nСТАТЬЯ ГОТОВА")
+    say(f"Linux: {article_file}")
+    if s.get("download", True):
+        exported = download_article(article_file, topic)
+        if exported:
+            say(f"Android Загрузки: {exported}")
+        else:
+            say("Не удалось открыть папку Android. В Termux выполни termux-setup-storage.")
+    say(f"Слов: {len(result.article.split())}, токенов: {result.total_tokens:,}")
+    say("Стоимость в долларах смотри в истории OpenRouter (счётчик показывает токены).")
+
+
+def recent_menu(s: dict) -> None:
+    cfg.RUNS.mkdir(parents=True, exist_ok=True)
+    dirs = sorted((p for p in cfg.RUNS.iterdir() if p.is_dir()), reverse=True)[:30]
+    if not dirs:
+        say("История пока пуста.")
+        return
+    names = []
+    for path in dirs:
+        try:
+            topic = (path / "topic.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            topic = "неизвестное задание"
+        names.append(f"{path.name[:15]} · {topic[:45]}")
+    choice = choose("Последние запуски", names + ["Назад"])
+    if not choice or choice > len(dirs):
+        return
+    selected = dirs[choice - 1]
+    article = selected / "СТАТЬЯ.md"
+    if not article.exists():
+        article = next(iter(sorted(selected.glob("*_article.md"))), None)
+    if article is None or not article.is_file():
+        say("Итоговая статья отсутствует. Возможно, запуск прервался.")
+        say("Файлы: " + ", ".join(x.name for x in selected.iterdir()))
+        return
+    option = choose("Готовая статья", ["Прочитать начало", "Повторно в Загрузки", "Показать путь"])
+    if option == 1:
+        console.print(Panel(article.read_text(encoding="utf-8")[:7500], title=article.name))
+    elif option == 2:
+        topic = (selected / "topic.txt").read_text(encoding="utf-8")
+        result = download_article(article, topic)
+        say(f"Экспорт: {result}" if result else "Папка загрузок недоступна.")
+    elif option == 3:
+        say(str(article))
+
+
+def system_menu(s: dict) -> None:
+    while True:
+        pick = choose("Система", [
+            "Добавить или заменить API-ключ OpenRouter",
+            "Проверить ключ (без генерации)",
+            "Копировать настройки в файл JSON",
+            "Включить / выключить копию статьи в Загрузках",
+            "Очистка кэша и статей",
+            "Вернуть настройки по умолчанию",
+            "Назад"])
+        if pick == 1:
+            try:
+                key = getpass.getpass("Вставь ключ OpenRouter (ввод скрыт): ")
+                if key:
+                    cfg.key_save(key)
+                    say("Ключ сохранён в приватной папке Linux (chmod 600).")
+                    if "OPENROUTER_API_KEY" in __import__("os").environ:
+                        say("Внимание: переменная окружения OPENROUTER_API_KEY имеет приоритет.")
+            except ValueError as error:
+                say(str(error))
+        elif pick == 2:
+            key = cfg.key_get()
+            if not key:
+                say("Ключ не задан.")
+                continue
+            try:
+                r = httpx.get("https://openrouter.ai/api/v1/auth/key",
+                              headers={"Authorization": "Bearer " + key}, timeout=20)
+                say("Авторизация успешна." if r.status_code == 200 else
+                    f"Проверка не пройдена (HTTP {r.status_code}).")
+            except httpx.HTTPError as error:
+                say("Ошибка сети: " + type(error).__name__)
+        elif pick == 3:
+            destination = cfg.HOME / "export-settings.json"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
+            say(f"Экспортировано без ключа: {destination}")
+        elif pick == 4:
+            s["download"] = not s["download"]
+            cfg.save(s)
+            say(f"Копия в Загрузки: {'да' if s['download'] else 'нет'}")
+        elif pick == 5:
+            cleanup_menu()
+        elif pick == 6:
+            if ask("Для сброса настроек введи СБРОС") == "СБРОС":
+                s.clear()
+                s.update(cfg.defaults())
+                cfg.save(s)
+                say("Настройки сброшены. Статьи и API-ключ не затронуты.")
+        else:
+            return
+
+
+def main() -> None:
+    try:
+        s = cfg.load()
+    except (ValueError, OSError) as error:
+        say(str(error))
+        return
+    while True:
+        try:
+            title = ("[bold cyan]AgentForge — управление статьями[/]\n"
+                     f"Модель: [green]{s['model']}[/]\n"
+                     f"Язык: {s['pipeline']['language']} | "
+                     f"поиск: {'вкл' if s['search']['enabled'] else 'выкл'} "
+                     f"({s['search']['calls']} запроса) | "
+                     f"редактура: до {s['pipeline']['passes']}")
+            console.print(Panel(title, border_style="cyan"))
+            index = choose("Главное меню", [
+                "Написать статью", "Выбрать модели и агентов",
+                "Интернет-поиск", "Промпты", "Расширенные настройки",
+                "Готовые статьи", "Система, API и очистка", "Выход"])
+            if index == 1:
+                run_article(s)
+            elif index == 2:
+                model_menu(s)
+            elif index == 3:
+                search_menu(s)
+            elif index == 4:
+                prompt_menu(s)
+            elif index == 5:
+                advanced_menu(s)
+            elif index == 6:
+                recent_menu(s)
+            elif index == 7:
+                system_menu(s)
+            else:
+                say("Завершено.")
+                return
+        except (KeyboardInterrupt, EOFError):
+            say("\nВозврат в меню.")
+        except (ValueError, OSError, httpx.HTTPError) as error:
+            say(f"Ошибка: {error}")
+
+
+if __name__ == "__main__":
+    main()
