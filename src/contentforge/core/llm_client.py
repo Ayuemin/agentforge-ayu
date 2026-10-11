@@ -103,6 +103,7 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         stream: bool = False,
+        reasoning_effort: Optional[str] = None,
     ) -> ChatResponse:
         """Send a chat completion request."""
         if not self._client:
@@ -111,12 +112,18 @@ class LLMClient:
         payload = {
             "model": model or self.config.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "temperature": temperature or self.config.temperature,
+            "temperature": self.config.temperature if temperature is None else temperature,
             "top_p": self.config.top_p,
             "stream": stream,
         }
         if not self.config.omit_max_tokens:
-            payload["max_tokens"] = max_tokens or self.config.max_tokens
+            payload["max_tokens"] = self.config.max_tokens if max_tokens is None else max_tokens
+        payload.update(self.config.extra_parameters)
+        effort = self.config.reasoning_effort if reasoning_effort is None else reasoning_effort
+        if effort and effort != "auto":
+            payload["reasoning"] = {"effort": effort}
+        elif reasoning_effort == "auto":
+            payload.pop("reasoning", None)
 
         start = time.monotonic()
 
@@ -218,12 +225,15 @@ class LLMClient:
         payload = {
             "model": model or self.config.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "temperature": temperature or self.config.temperature,
+            "temperature": self.config.temperature if temperature is None else temperature,
             "top_p": self.config.top_p,
             "stream": True,
         }
         if not self.config.omit_max_tokens:
-            payload["max_tokens"] = max_tokens or self.config.max_tokens
+            payload["max_tokens"] = self.config.max_tokens if max_tokens is None else max_tokens
+        payload.update(self.config.extra_parameters)
+        if self.config.reasoning_effort:
+            payload["reasoning"] = {"effort": self.config.reasoning_effort}
 
         async with self._client.stream("POST", "/chat/completions", json=payload) as resp:
             resp.raise_for_status()
