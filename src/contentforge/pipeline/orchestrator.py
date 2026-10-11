@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 from ..agents import AGENT_REGISTRY, get_agent
@@ -82,11 +83,16 @@ class PipelineOrchestrator:
         self.tracker = TokenTracker(output_dir=config.output_dir)
         self._client: Optional[MiMoClient] = None
 
-    async def run(self, topic: str, **kwargs) -> PipelineResult:
+    async def run(self, topic: str, *, research_context: str = "", **kwargs) -> PipelineResult:
         """Execute the full pipeline for a given topic."""
         result = PipelineResult()
 
         self.tracker.start_pipeline()
+        steps = Path(self.config.output_dir)
+        steps.mkdir(parents=True, exist_ok=True)
+
+        def snapshot(name: str, text: str) -> None:
+            (steps / name).write_text(text, encoding="utf-8")
 
         async with MiMoClient(self.config.mimo) as client:
             self._client = client
@@ -97,9 +103,10 @@ class PipelineOrchestrator:
                 research_agent = get_agent(
                     "research", config=self.config, client=client, tracker=self.tracker
                 )
-                research_result = await research_agent.run(topic=topic)
+                research_result = await research_agent.run(topic=topic, source_context=research_context)
                 result.agent_results["research"] = research_result
                 result.research = research_result.content
+                snapshot("01_research.json", research_result.content)
 
                 if not research_result.ok:
                     result.status = "failed"
@@ -117,6 +124,7 @@ class PipelineOrchestrator:
                 )
                 result.agent_results["outline"] = outline_result
                 result.outline = outline_result.content
+                snapshot("02_outline.json", outline_result.content)
 
                 if not outline_result.ok:
                     result.status = "failed"
@@ -135,6 +143,7 @@ class PipelineOrchestrator:
                 )
                 result.agent_results["writer"] = writer_result
                 current_content = writer_result.content
+                snapshot("03_writer.md", current_content)
 
                 # Step 4: SEO Analysis
                 logger.info("[Pipeline] Step 4/8: SEO")
@@ -144,6 +153,7 @@ class PipelineOrchestrator:
                 seo_result = await seo_agent.run(content=current_content)
                 result.agent_results["seo"] = seo_result
                 result.seo_analysis = seo_result.content
+                snapshot("04_seo.json", seo_result.content)
 
                 # Step 5 + 6: Editor → Quality loop
                 for iteration in range(self.config.pipeline.max_iterations):
@@ -157,6 +167,7 @@ class PipelineOrchestrator:
                     )
                     result.agent_results["editor"] = editor_result
                     current_content = editor_result.content
+                    snapshot(f"05_editor_{iteration + 1}.md", current_content)
 
                     logger.info(f"[Pipeline] Step 6/8: Quality (iteration {iteration + 1})")
                     quality_agent = get_agent(
@@ -169,6 +180,7 @@ class PipelineOrchestrator:
                     )
                     result.agent_results["quality"] = quality_result
                     result.quality_report = quality_result.content
+                    snapshot(f"06_quality_{iteration + 1}.json", quality_result.content)
 
                     # Check if quality passes threshold
                     quality_score = quality_result.metadata.get("overall_score", 0)
@@ -215,6 +227,7 @@ class PipelineOrchestrator:
                 )
                 result.agent_results["publisher"] = publisher_result
                 result.publisher_output = publisher_result.content
+                snapshot("08_publisher.json", publisher_result.content)
 
             except Exception as e:
                 logger.error(f"[Pipeline] Fatal error: {e}")
