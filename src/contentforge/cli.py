@@ -46,8 +46,8 @@ def main(ctx: click.Context, config: str | None, verbose: bool) -> None:
 
 @main.command()
 @click.argument("topic")
-@click.option("--words", "-w", default=2000, help="Target word count")
-@click.option("--language", "-l", default="en", help="Content language")
+@click.option("--words", "-w", type=int, default=None, help="Target word count")
+@click.option("--language", "-l", type=str, default=None, help="Content language")
 @click.option("--output", "-o", default="./output", help="Output directory")
 @click.option("--format", "-f", "fmt", default="markdown", help="Output format")
 @click.option("--seo/--no-seo", default=True, help="Enable SEO optimization")
@@ -58,8 +58,8 @@ def main(ctx: click.Context, config: str | None, verbose: bool) -> None:
 def generate(
     ctx: click.Context,
     topic: str,
-    words: int,
-    language: str,
+    words: int | None,
+    language: str | None,
     output: str,
     fmt: str,
     seo: bool,
@@ -70,8 +70,10 @@ def generate(
     """Generate content for a given topic using all 8 agents."""
     config: ContentForgeConfig = ctx.obj.get("config") or ContentForgeConfig.from_env()
     config.pipeline.topic = topic
-    config.pipeline.target_word_count = words
-    config.pipeline.language = language
+    if words is not None:
+        config.pipeline.target_word_count = words
+    if language is not None:
+        config.pipeline.language = language
     config.pipeline.output_format = fmt
     config.pipeline.seo_enabled = seo
     config.pipeline.quality_threshold = threshold
@@ -86,7 +88,8 @@ def generate(
         Panel(
             f"[bold cyan]MiMo ContentForge v{__version__}[/]\n"
             f"Topic: [green]{topic}[/]\n"
-            f"Words: {words} | Lang: {language} | Format: {fmt}\n"
+            f"Words: {config.pipeline.target_word_count} | "
+            f"Lang: {config.pipeline.language} | Format: {fmt}\n"
             f"SEO: {'ON' if seo else 'OFF'} | Quality: {threshold}\n"
             f"Translate: {', '.join(translate) if translate else 'disabled'}",
             title="Pipeline Configuration",
