@@ -37,6 +37,7 @@ DEFAULTS = {
     "search": {"enabled": True, "calls": 3, "results": 3, "engine": "auto"},
     "pipeline": {"language": "ru", "words": 1000, "passes": 3, "quality": 0.8, "allow_tables": False, "editorial_profile": "dzen", "min_chars": 4000, "target_chars": 6000, "max_chars": 8000, "title_max_chars": 147},
     "download": True,
+    "skill": {"enabled": False},
 }
 
 
@@ -118,7 +119,7 @@ def make_config(data: dict, directory: Path) -> ContentForgeConfig:
         if changes:
             agents.append(AgentConfig(name=name, **changes))
     pipeline = data["pipeline"]
-    return ContentForgeConfig(
+    config = ContentForgeConfig(
         llm=llm, agents=agents,
         pipeline=PipelineConfig(
             language=pipeline["language"],
@@ -135,3 +136,13 @@ def make_config(data: dict, directory: Path) -> ContentForgeConfig:
             enable_translation=False,
         ), output_dir=str(directory),
     )
+    if data.get("skill", {}).get("enabled") and config.pipeline.editorial_profile == "dzen":
+        from .skill_loader import read_skill
+
+        bundle = read_skill()
+        config._skill_texts = {
+            name: bundle.context_for(name)
+            for name in ("outline", "writer", "editor", "quality")
+        }
+        config._skill_digest = bundle.digest
+    return config
