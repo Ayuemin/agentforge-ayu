@@ -35,7 +35,7 @@ DEFAULTS = {
     "retries": 3,
     "extra": {},
     "search": {"enabled": True, "calls": 3, "results": 3, "engine": "auto"},
-    "pipeline": {"language": "ru", "words": 1500, "passes": 3, "quality": 0.8},
+    "pipeline": {"language": "ru", "words": 1500, "passes": 3, "quality": 0.8, "allow_tables": False},
     "download": True,
 }
 
@@ -105,8 +105,16 @@ def make_config(data: dict, directory: Path) -> ContentForgeConfig:
             changes["reasoning_effort_override"] = data["agent_reasoning"][name]
         if data["prompts"].get(name):
             changes["system_prompt_override"] = data["prompts"][name]
-        if data["user_instructions"].get(name):
-            changes["user_prompt_addition"] = data["user_instructions"][name]
+        custom_instruction = data["user_instructions"].get(name, "")
+        if name in {"writer", "editor"} and not data["pipeline"].get("allow_tables", False):
+            custom_instruction += (
+                "\n\nТребования к оформлению статьи: не создавай таблицы "
+                "ни в Markdown, ни в HTML. Все сравнения, числовые данные "
+                "и характеристики раскрывай обычными абзацами или списками. "
+                "Сохраняй все существенные факты и значения."
+            )
+        if custom_instruction.strip():
+            changes["user_prompt_addition"] = custom_instruction.strip()
         if changes:
             agents.append(AgentConfig(name=name, **changes))
     pipeline = data["pipeline"]
