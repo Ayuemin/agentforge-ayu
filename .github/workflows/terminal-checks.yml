@@ -21,4 +21,4 @@ jobs:
       - name: Verify Python syntax
         run: python -m compileall -q src/contentforge
       - name: Unit tests
-        run: pytest -q tests/unit/test_terminal_app.py tests/unit/test_android_profile.py tests/unit/test_model_comparison_profiles.py
+        run: pytest -q tests/unit/test_terminal_app.py tests/unit/test_article_format.py tests/unit/test_android_profile.py tests/unit/test_model_comparison_profiles.py
