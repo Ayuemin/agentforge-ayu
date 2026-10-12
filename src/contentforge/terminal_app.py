@@ -168,14 +168,24 @@ def model_menu(s: dict) -> None:
 def pipeline_menu(s: dict) -> None:
     while True:
         p = s["pipeline"]
-        say(f"\nЯзык: {p['language']} · слов: {p['words']} · проходов: до {p['passes']}"
-            f" · таблицы: {'да' if p.get('allow_tables', False) else 'нет'}")
+        if p.get("editorial_profile") == "dzen":
+            say(f"\nПлощадка: Дзен · цель: {p['target_chars']} знаков "
+                f"({p['min_chars']}–{p['max_chars']}) · заголовок до {p['title_max_chars']}")
+        else:
+            say(f"\nЯзык: {p['language']} · слов: {p['words']}")
+        say(f"Проходов: до {p['passes']} · таблицы: "
+            f"{'да' if p.get('allow_tables', False) else 'нет'}")
         pick = choose("Статья и конвейер", [
             "Целевой объём статьи (слов)", "Максимум проходов редактора",
             "Порог качества (0.0—1.0)", "Язык",
             "Таблицы в статье: включить / выключить",
+            "Редакционный профиль: Дзен / общий",
+            "Целевой объём Дзена (знаки)",
+            "Минимум знаков Дзена",
+            "Максимум знаков Дзена",
+            "Предел заголовка (символы)",
             "Назад"])
-        if not pick or pick == 6:
+        if not pick or pick == 11:
             return
         try:
             if pick == 1:
@@ -190,6 +200,25 @@ def pipeline_menu(s: dict) -> None:
                 p["allow_tables"] = not p.get("allow_tables", False)
                 say("Таблицы разрешены." if p["allow_tables"]
                     else "Таблицы запрещены: данные будут представлены текстом или списками.")
+            elif pick == 6:
+                p["editorial_profile"] = (
+                    "general" if p.get("editorial_profile") == "dzen" else "dzen"
+                )
+            elif pick == 7:
+                p["target_chars"] = number(
+                    "Желаемый объём (знаки)", p["target_chars"], int, 1000, 20000
+                )
+            elif pick == 8:
+                p["min_chars"] = number("Минимум (знаки)", p["min_chars"], int, 500, 20000)
+            elif pick == 9:
+                p["max_chars"] = number("Максимум (знаки)", p["max_chars"], int, 500, 20000)
+            elif pick == 10:
+                p["title_max_chars"] = number(
+                    "Заголовок максимум", p["title_max_chars"], int, 20, 300
+                )
+            if not p["min_chars"] <= p["target_chars"] <= p["max_chars"]:
+                say("Ошибка: должно быть минимум ≤ цель ≤ максимум.")
+                continue
             cfg.save(s)
         except ValueError as error:
             say(f"Ошибка: {error}")
@@ -459,6 +488,10 @@ def run_article(s: dict) -> None:
     search = s["search"]
     say(f"Поиск: до {search['calls']} запросов" if search["enabled"] else "Поиск: выключен")
     say(f"Язык: {s['pipeline']['language']} · до {s['pipeline']['passes']} проходов редактора")
+    if s["pipeline"].get("editorial_profile") == "dzen":
+        p = s["pipeline"]
+        say(f"Дзен: {p['min_chars']}–{p['max_chars']} знаков; заголовок до "
+            f"{p['title_max_chars']} символов")
     say("API и запасной платный поиск могут списывать средства OpenRouter.")
     if ask("Начать? (да/нет)", "нет").lower() not in {"да", "д", "yes", "y"}:
         say("Отменено. Платных запросов не было.")
@@ -497,6 +530,15 @@ def run_article(s: dict) -> None:
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
 
+    if result.status == "needs_review":
+        say("Статья пока НЕ ГОТОВА для Дзена: после редакторских проходов "
+            "остались замечания по объёму или качеству.")
+        if result.editorial_audit.get("issues"):
+            for issue in result.editorial_audit["issues"]:
+                say("• " + issue)
+        say("Черновик и отчёты сохранены в Linux, в Android Загрузки он не копируется.")
+        say(str(folder))
+        return
     if not result.ok:
         say("Конвейер завершился с ошибкой. Уже созданные файлы сохранены:")
         say(str(folder))
