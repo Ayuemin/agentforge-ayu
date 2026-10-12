@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from ..core.request_errors import describe_error
 from ..core.config import ContentForgeConfig
 from ..core.mimo_client import ChatMessage, ChatResponse, MiMoClient
 from ..core.token_tracker import TokenTracker
@@ -133,7 +134,7 @@ class BaseAgent(ABC):
                 latency_ms=latency,
                 errors=1,
             )
-            logger.error(f"Agent {self.name} MiMo call failed: {e}")
+            logger.error("Агент %s: %s", self.name, describe_error(e, timeout=self.config.llm.timeout))
             raise
 
     @abstractmethod
@@ -154,9 +155,9 @@ class BaseAgent(ABC):
             )
             return result
         except Exception as e:
-            logger.error(f"[{self.name}] Failed: {e}")
+            logger.error("[%s] Failed: %s", self.name, describe_error(e, timeout=self.config.llm.timeout))
             return AgentResult(
                 agent_name=self.name,
                 status="failed",
-                error=str(e),
+                error=describe_error(e, timeout=self.config.llm.timeout),
             )
