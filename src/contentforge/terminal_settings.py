@@ -35,7 +35,7 @@ DEFAULTS = {
     "retries": 3,
     "extra": {},
     "search": {"enabled": True, "calls": 3, "results": 3, "engine": "auto"},
-    "pipeline": {"language": "ru", "words": 1500, "passes": 3, "quality": 0.8, "allow_tables": False},
+    "pipeline": {"language": "ru", "words": 1000, "passes": 3, "quality": 0.8, "allow_tables": False, "editorial_profile": "dzen", "min_chars": 4000, "target_chars": 6000, "max_chars": 8000, "title_max_chars": 147},
     "download": True,
 }
 
@@ -121,7 +121,16 @@ def make_config(data: dict, directory: Path) -> ContentForgeConfig:
     return ContentForgeConfig(
         llm=llm, agents=agents,
         pipeline=PipelineConfig(
-            language=pipeline["language"], target_word_count=pipeline["words"],
+            language=pipeline["language"],
+            target_word_count=(
+                max(200, round(pipeline["target_chars"] / 6))
+                if pipeline.get("editorial_profile") == "dzen" else pipeline["words"]
+            ),
+            editorial_profile=pipeline.get("editorial_profile", "general"),
+            min_chars=pipeline.get("min_chars", 4000),
+            target_chars=pipeline.get("target_chars", 6000),
+            max_chars=pipeline.get("max_chars", 8000),
+            title_max_chars=pipeline.get("title_max_chars", 147),
             max_iterations=pipeline["passes"], quality_threshold=pipeline["quality"],
             enable_translation=False,
         ), output_dir=str(directory),
