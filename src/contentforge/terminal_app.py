@@ -168,12 +168,14 @@ def model_menu(s: dict) -> None:
 def pipeline_menu(s: dict) -> None:
     while True:
         p = s["pipeline"]
-        say(f"\nРусский: {p['language']} · слов: {p['words']} · проходов: до {p['passes']}")
+        say(f"\nЯзык: {p['language']} · слов: {p['words']} · проходов: до {p['passes']}"
+            f" · таблицы: {'да' if p.get('allow_tables', False) else 'нет'}")
         pick = choose("Статья и конвейер", [
             "Целевой объём статьи (слов)", "Максимум проходов редактора",
             "Порог качества (0.0—1.0)", "Язык",
+            "Таблицы в статье: включить / выключить",
             "Назад"])
-        if not pick or pick == 5:
+        if not pick or pick == 6:
             return
         try:
             if pick == 1:
@@ -184,6 +186,10 @@ def pipeline_menu(s: dict) -> None:
                 p["quality"] = number("Порог", p["quality"], float, 0, 1)
             elif pick == 4:
                 p["language"] = ask("Код языка", p["language"])[:8]
+            elif pick == 5:
+                p["allow_tables"] = not p.get("allow_tables", False)
+                say("Таблицы разрешены." if p["allow_tables"]
+                    else "Таблицы запрещены: данные будут представлены текстом или списками.")
             cfg.save(s)
         except ValueError as error:
             say(f"Ошибка: {error}")
@@ -496,8 +502,17 @@ def run_article(s: dict) -> None:
         say(str(folder))
         return
 
+    from .article_format import format_article
+
     article_file = folder / "СТАТЬЯ.md"
-    article_file.write_text(clean_article(result.article), encoding="utf-8")
+    article_text = clean_article(result.article)
+    article_text, remaining_tables = format_article(
+        article_text, allow_tables=s["pipeline"].get("allow_tables", False)
+    )
+    article_file.write_text(article_text, encoding="utf-8")
+    if remaining_tables:
+        say("Внимание: в статье осталась нестандартная таблица. "
+            "Она сохранена без удаления данных, проверь файл перед публикацией.")
     say("\nСТАТЬЯ ГОТОВА")
     say(f"Linux: {article_file}")
     if s.get("download", True):
