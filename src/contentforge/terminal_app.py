@@ -488,6 +488,13 @@ def run_article(s: dict) -> None:
     search = s["search"]
     say(f"Поиск: до {search['calls']} запросов" if search["enabled"] else "Поиск: выключен")
     say(f"Язык: {s['pipeline']['language']} · до {s['pipeline']['passes']} проходов редактора")
+    if s.get("skill", {}).get("enabled") and s["pipeline"].get("editorial_profile") == "dzen":
+        from .skill_loader import read_skill
+
+        bundle = read_skill()
+        say(f"Методика Никитиной: включена, 7 полных справочников; "
+            f"в запрос Writer добавляется {len(bundle.context_for('writer')):,} символов.")
+        say("На каждом повторном проходе Editor справочники передаются снова.")
     if s["pipeline"].get("editorial_profile") == "dzen":
         p = s["pipeline"]
         say(f"Дзен: {p['min_chars']}–{p['max_chars']} знаков; заголовок до "
@@ -498,6 +505,16 @@ def run_article(s: dict) -> None:
         return
     config = cfg.make_config(s, folder)
     folder.mkdir(parents=True, exist_ok=False)
+    if config._skill_digest:
+        (folder / "skill_manifest.json").write_text(
+            json.dumps({
+                "skill": "nikitina-text",
+                "sha256": config._skill_digest,
+                "mode": "original_full_files",
+                "stages": ["outline", "writer", "editor", "quality"],
+                "note": "Full skill files stay private outside Git and run folder.",
+            }, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     (folder / "settings.json").write_text(
         json.dumps({k: v for k, v in s.items() if k != "api_key"},
                    ensure_ascii=False, indent=2), encoding="utf-8")
@@ -602,6 +619,60 @@ def recent_menu(s: dict) -> None:
         say(str(article))
 
 
+def skill_menu(settings: dict) -> None:
+    """Install or toggle a full, locally stored editorial skill."""
+    from .skill_loader import SKILL_DIRECTORY, SKILL_NAME, install_zip, read_skill
+
+    while True:
+        installed = False
+        try:
+            bundle = read_skill()
+            installed = True
+            say(f"\nНавык: {SKILL_NAME} · 7 полных справочников")
+            say(f"Размер исходных текстов: {bundle.size_chars:,} символов")
+            say("Контрольная сумма: " + bundle.digest[:16])
+        except ValueError:
+            say("\nНавык не установлен или его файлы неполны.")
+        enabled = bool(settings["skill"].get("enabled", False))
+        say(f"Применение к статьям Дзена: {'ВКЛ' if enabled else 'ВЫКЛ'}")
+        selection = choose("Методика Никитиной", [
+            "Установить / заменить навык из ZIP в Загрузках",
+            "Включить / выключить применение",
+            "Показать папку и состав",
+            "Назад",
+        ])
+        if selection == 1:
+            candidates = [
+                Path("/sdcard/Download/nikitina-text-full-private.zip"),
+                Path("/sdcard/Download/nikitina-text-restored.zip"),
+                Path("/storage/emulated/0/Download/nikitina-text-full-private.zip"),
+                Path("/storage/emulated/0/Download/nikitina-text-restored.zip"),
+            ]
+            suggested = next((str(p) for p in candidates if p.is_file()), str(candidates[0]))
+            path = ask("Путь к ZIP на телефоне", suggested)
+            try:
+                bundle = install_zip(Path(path))
+                settings["skill"]["enabled"] = True
+                cfg.save(settings)
+                say(f"Установлены полные оригинальные файлы ({bundle.size_chars:,} символов).")
+                say("Навык включён для следующих статей.")
+            except (ValueError, OSError) as error:
+                say(f"Не получилось установить: {error}")
+        elif selection == 2:
+            if not enabled and not installed:
+                say("Сначала установи полный ZIP. Без файлов навык включать нельзя.")
+            else:
+                settings["skill"]["enabled"] = not enabled
+                cfg.save(settings)
+                say("Настройка сохранена.")
+        elif selection == 3:
+            say("Папка в Ubuntu: " + str(SKILL_DIRECTORY))
+            say("Файлы: SKILL.md и все семь Markdown-файлов references/.")
+            say("Справочники не сокращаются и не загружаются в GitHub.")
+        else:
+            return
+
+
 def system_menu(s: dict) -> None:
     while True:
         pick = choose("Система", [
@@ -609,6 +680,7 @@ def system_menu(s: dict) -> None:
             "Проверить ключ (без генерации)",
             "Копировать настройки в файл JSON",
             "Включить / выключить копию статьи в Загрузках",
+            "Методика Никитиной (ZIP, включение/выключение)",
             "Хранилище (кэш и история)",
             "Вернуть настройки по умолчанию",
             "Назад"])
@@ -644,8 +716,10 @@ def system_menu(s: dict) -> None:
             cfg.save(s)
             say(f"Копия в Загрузки: {'да' if s['download'] else 'нет'}")
         elif pick == 5:
-            cleanup_menu()
+            skill_menu(s)
         elif pick == 6:
+            cleanup_menu()
+        elif pick == 7:
             if ask("Для сброса настроек введи СБРОС") == "СБРОС":
                 s.clear()
                 s.update(cfg.defaults())
@@ -668,7 +742,8 @@ def main() -> None:
                      f"Язык: {s['pipeline']['language']} | "
                      f"поиск: {'вкл' if s['search']['enabled'] else 'выкл'} "
                      f"({s['search']['calls']} запроса) | "
-                     f"редактура: до {s['pipeline']['passes']}")
+                     f"редактура: до {s['pipeline']['passes']} | "
+                     f"навык: {'вкл' if s.get('skill', {}).get('enabled') else 'выкл'}")
             console.print(Panel(title, border_style="cyan"))
             index = choose("Главное меню", [
                 "Написать статью", "Выбрать модели и агентов",
