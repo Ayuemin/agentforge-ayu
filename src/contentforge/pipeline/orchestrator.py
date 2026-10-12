@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ class PipelineResult:
     seo_analysis: str = ""
     quality_report: str = ""
     publisher_output: str = ""
+    editorial_audit: dict[str, Any] = field(default_factory=dict)
     translations: dict[str, str] = field(default_factory=dict)
     agent_results: dict[str, AgentResult] = field(default_factory=dict)
     metrics_path: str = ""
@@ -47,6 +49,7 @@ class PipelineResult:
             "word_count": len(self.article.split()),
             "translations": list(self.translations.keys()),
             "metrics_path": self.metrics_path,
+            "editorial_audit": self.editorial_audit,
         }
 
 
@@ -156,6 +159,8 @@ class PipelineOrchestrator:
                 snapshot("04_seo.json", seo_result.content)
 
                 # Step 5 + 6: Editor → Quality loop
+                dzen_mode = self.config.pipeline.editorial_profile == "dzen"
+                previous_feedback = ""
                 for iteration in range(self.config.pipeline.max_iterations):
                     logger.info(f"[Pipeline] Step 5/8: Editor (iteration {iteration + 1})")
                     editor_agent = get_agent(
@@ -164,6 +169,7 @@ class PipelineOrchestrator:
                     editor_result = await editor_agent.run(
                         content=current_content,
                         seo_recommendations=seo_result.content,
+                        editorial_feedback=previous_feedback if dzen_mode else "",
                     )
                     result.agent_results["editor"] = editor_result
                     current_content = editor_result.content
@@ -182,10 +188,36 @@ class PipelineOrchestrator:
                     result.quality_report = quality_result.content
                     snapshot(f"06_quality_{iteration + 1}.json", quality_result.content)
 
-                    # Check if quality passes threshold
+                    # Original Quality JSON score remains in charge; the
+                    # Dzen branch also checks actual readable character counts.
                     quality_score = quality_result.metadata.get("overall_score", 0)
                     threshold = self.config.pipeline.quality_threshold * 100
-                    if quality_score >= threshold:
+                    audit_ok = True
+                    if dzen_mode:
+                        from ..dzen_editorial import article_audit
+
+                        p = self.config.pipeline
+                        audit = article_audit(
+                            current_content, p.min_chars, p.max_chars, p.title_max_chars
+                        )
+                        result.editorial_audit = audit
+                        snapshot("07_dzen_audit.json", json.dumps(
+                            audit, ensure_ascii=False, indent=2
+                        ))
+                        audit_ok = audit["passed"]
+                        messages = list(audit["issues"])
+                        try:
+                            reviewed = json.loads(quality_result.content)
+                            if isinstance(reviewed, dict):
+                                for key in ("factual_issues", "logical_inconsistencies",
+                                            "improvement_suggestions"):
+                                    notes = reviewed.get(key, [])
+                                    if isinstance(notes, list):
+                                        messages.extend(str(note) for note in notes[:4])
+                        except (ValueError, TypeError):
+                            messages.append("Не удалось прочитать JSON замечаний Quality.")
+                        previous_feedback = "\n".join(messages[:14])
+                    if quality_score >= threshold and audit_ok:
                         logger.info(
                             f"[Pipeline] Quality score {quality_score} >= {threshold}, passing"
                         )
@@ -197,6 +229,9 @@ class PipelineOrchestrator:
                         )
 
                 result.article = current_content
+                if dzen_mode and not result.editorial_audit.get("passed", False):
+                    result.status = "needs_review"
+                    snapshot("НЕГОТОВО_требует_правки.md", current_content)
 
                 # Step 7: Translation (if enabled)
                 if self.config.pipeline.enable_translation:
