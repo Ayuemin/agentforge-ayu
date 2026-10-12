@@ -88,6 +88,10 @@ class BaseAgent(ABC):
             system_content += "\n\n" + stage_guidance(
                 self.name, p.min_chars, p.target_chars, p.max_chars, p.title_max_chars
             )
+        if self.config.pipeline.editorial_profile == "dzen":
+            skill_context = self.config._skill_texts.get(self.name, "")
+            if skill_context:
+                system_content += "\n\n" + skill_context
         messages = [ChatMessage(role="system", content=system_content)]
 
         if context:
