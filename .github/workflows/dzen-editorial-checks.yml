@@ -22,4 +22,4 @@ jobs:
       - name: Verify syntax
         run: python -m compileall -q src/contentforge tests/unit/test_dzen_editorial.py
       - name: Run original and Dzen regression tests (offline)
-        run: pytest -q tests/unit/test_dzen_faults.py tests/unit/test_nikitina_skill.py tests/unit/test_dzen_editorial.py tests/unit/test_agents.py tests/integration/test_pipeline.py tests/unit/test_terminal_app.py tests/unit/test_article_format.py
+        run: pytest -q tests/unit/test_dzen_original_brief.py tests/unit/test_dzen_faults.py tests/unit/test_nikitina_skill.py tests/unit/test_dzen_editorial.py tests/unit/test_agents.py tests/integration/test_pipeline.py tests/unit/test_terminal_app.py tests/unit/test_article_format.py
