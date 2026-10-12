@@ -168,14 +168,24 @@ def model_menu(s: dict) -> None:
 def pipeline_menu(s: dict) -> None:
     while True:
         p = s["pipeline"]
-        say(f"\nЯзык: {p['language']} · слов: {p['words']} · проходов: до {p['passes']}"
-            f" · таблицы: {'да' if p.get('allow_tables', False) else 'нет'}")
+        if p.get("editorial_profile") == "dzen":
+            say(f"\nПлощадка: Дзен · цель: {p['target_chars']} знаков "
+                f"({p['min_chars']}–{p['max_chars']}) · заголовок до {p['title_max_chars']}")
+        else:
+            say(f"\nЯзык: {p['language']} · слов: {p['words']}")
+        say(f"Проходов: до {p['passes']} · таблицы: "
+            f"{'да' if p.get('allow_tables', False) else 'нет'}")
         pick = choose("Статья и конвейер", [
             "Целевой объём статьи (слов)", "Максимум проходов редактора",
             "Порог качества (0.0—1.0)", "Язык",
             "Таблицы в статье: включить / выключить",
+            "Редакционный профиль: Дзен / общий",
+            "Целевой объём Дзена (знаки)",
+            "Минимум знаков Дзена",
+            "Максимум знаков Дзена",
+            "Предел заголовка (символы)",
             "Назад"])
-        if not pick or pick == 6:
+        if not pick or pick == 11:
             return
         try:
             if pick == 1:
@@ -190,6 +200,25 @@ def pipeline_menu(s: dict) -> None:
                 p["allow_tables"] = not p.get("allow_tables", False)
                 say("Таблицы разрешены." if p["allow_tables"]
                     else "Таблицы запрещены: данные будут представлены текстом или списками.")
+            elif pick == 6:
+                p["editorial_profile"] = (
+                    "general" if p.get("editorial_profile") == "dzen" else "dzen"
+                )
+            elif pick == 7:
+                p["target_chars"] = number(
+                    "Желаемый объём (знаки)", p["target_chars"], int, 1000, 20000
+                )
+            elif pick == 8:
+                p["min_chars"] = number("Минимум (знаки)", p["min_chars"], int, 500, 20000)
+            elif pick == 9:
+                p["max_chars"] = number("Максимум (знаки)", p["max_chars"], int, 500, 20000)
+            elif pick == 10:
+                p["title_max_chars"] = number(
+                    "Заголовок максимум", p["title_max_chars"], int, 20, 300
+                )
+            if not p["min_chars"] <= p["target_chars"] <= p["max_chars"]:
+                say("Ошибка: должно быть минимум ≤ цель ≤ максимум.")
+                continue
             cfg.save(s)
         except ValueError as error:
             say(f"Ошибка: {error}")
@@ -396,7 +425,7 @@ def clean_article(value: str) -> str:
     return value.strip() + "\n"
 
 
-def download_article(article: Path, topic: str) -> Path | None:
+def download_article(article: Path, topic: str, *, draft: bool = False) -> Path | None:
     """Copy without modifying the Linux original."""
     name = re.sub(r"[^\wа-яА-Я-]+", "_", topic, flags=re.UNICODE).strip("_")[:48]
     name = name or "statya"
@@ -407,7 +436,8 @@ def download_article(article: Path, topic: str) -> Path | None:
         Path("/data/data/com.termux/files/home/storage/downloads"),
     ):
         if folder.is_dir():
-            dest = folder / (f"AgentForge_{stamp}_{name}.md")
+            label = "AgentForge_ЧЕРНОВИК" if draft else "AgentForge"
+            dest = folder / (f"{label}_{stamp}_{name}.md")
             try:
                 shutil.copyfile(article, dest)
                 return dest
@@ -459,12 +489,33 @@ def run_article(s: dict) -> None:
     search = s["search"]
     say(f"Поиск: до {search['calls']} запросов" if search["enabled"] else "Поиск: выключен")
     say(f"Язык: {s['pipeline']['language']} · до {s['pipeline']['passes']} проходов редактора")
+    if s.get("skill", {}).get("enabled") and s["pipeline"].get("editorial_profile") == "dzen":
+        from .skill_loader import read_skill
+
+        bundle = read_skill()
+        say(f"Методика Никитиной: включена, 7 полных справочников; "
+            f"в запрос Writer добавляется {len(bundle.context_for('writer')):,} символов.")
+        say("На каждом повторном проходе Editor справочники передаются снова.")
+    if s["pipeline"].get("editorial_profile") == "dzen":
+        p = s["pipeline"]
+        say(f"Дзен: {p['min_chars']}–{p['max_chars']} знаков; заголовок до "
+            f"{p['title_max_chars']} символов")
     say("API и запасной платный поиск могут списывать средства OpenRouter.")
     if ask("Начать? (да/нет)", "нет").lower() not in {"да", "д", "yes", "y"}:
         say("Отменено. Платных запросов не было.")
         return
     config = cfg.make_config(s, folder)
     folder.mkdir(parents=True, exist_ok=False)
+    if config._skill_digest:
+        (folder / "skill_manifest.json").write_text(
+            json.dumps({
+                "skill": "nikitina-text",
+                "sha256": config._skill_digest,
+                "mode": "original_full_files",
+                "stages": ["outline", "writer", "editor", "quality"],
+                "note": "Full skill files stay private outside Git and run folder.",
+            }, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     (folder / "settings.json").write_text(
         json.dumps({k: v for k, v in s.items() if k != "api_key"},
                    ensure_ascii=False, indent=2), encoding="utf-8")
@@ -497,9 +548,41 @@ def run_article(s: dict) -> None:
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
 
+    if result.status == "needs_review":
+        from .article_format import format_article
+
+        draft_path = folder / "ЧЕРНОВИК.md"
+        draft_text = clean_article(result.article)
+        draft_text, remaining_tables = format_article(
+            draft_text, allow_tables=s["pipeline"].get("allow_tables", False)
+        )
+        draft_path.write_text(draft_text, encoding="utf-8")
+        say("Статья написана, но редакционная проверка ещё не пройдена.")
+        say(f"Оценка качества: {result.quality_score:g} из 100; "
+            f"нужно минимум {s['pipeline']['quality'] * 100:g}.")
+        say(f"Объём: {result.editorial_audit.get('body_chars', 'не определён')} знаков "
+            f"(норма {s['pipeline']['min_chars']}–{s['pipeline']['max_chars']}).")
+        for issue in result.editorial_audit.get("issues", []):
+            say("• " + issue)
+        if result.editorial_audit.get("quality_parse_error"):
+            say("• " + result.editorial_audit["quality_parse_error"])
+        if remaining_tables:
+            say("• В черновике осталась нестандартная таблица.")
+        say(f"Полный черновик сохранён: {draft_path}")
+        if s.get("download", True):
+            exported = download_article(draft_path, topic, draft=True)
+            say(f"Android Загрузки (ЧЕРНОВИК): {exported}" if exported
+                else "Не удалось скопировать черновик в Загрузки Android.")
+        say("Черновик не помечен как готовый к публикации.")
+        return
     if not result.ok:
-        say("Конвейер завершился с ошибкой. Уже созданные файлы сохранены:")
-        say(str(folder))
+        say("Конвейер завершился с ошибкой.")
+        if result.failed_stage:
+            say(f"Проблемный этап: {result.failed_stage}")
+        if result.error_message:
+            say(f"Причина: {result.error_message}")
+        say(f"Файлы диагностики: {folder / 'run_status.json'}")
+        say("Созданные ранее промежуточные тексты не удалены.")
         return
 
     from .article_format import format_article
@@ -526,6 +609,7 @@ def run_article(s: dict) -> None:
 
 
 def recent_menu(s: dict) -> None:
+    """Show both completed articles and clearly labeled unfinished drafts."""
     cfg.RUNS.mkdir(parents=True, exist_ok=True)
     dirs = sorted((p for p in cfg.RUNS.iterdir() if p.is_dir()), reverse=True)[:30]
     if not dirs:
@@ -537,27 +621,121 @@ def recent_menu(s: dict) -> None:
             topic = (path / "topic.txt").read_text(encoding="utf-8").strip()
         except OSError:
             topic = "неизвестное задание"
-        names.append(f"{path.name[:15]} · {topic[:45]}")
+        is_draft = (
+            (path / "ЧЕРНОВИК.md").exists()
+            or (path / "НЕГОТОВО_требует_правки.md").exists()
+        )
+        label = "ЧЕРНОВИК · " if is_draft else ""
+        names.append(f"{label}{path.name[:15]} · {topic[:45]}")
     choice = choose("Последние запуски", names + ["Назад"])
     if not choice or choice > len(dirs):
         return
     selected = dirs[choice - 1]
+    status_file = selected / "run_status.json"
+    try:
+        status = json.loads(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        status = {}
     article = selected / "СТАТЬЯ.md"
-    if not article.exists():
+    is_draft = bool(
+        (selected / "ЧЕРНОВИК.md").exists()
+        or (selected / "НЕГОТОВО_требует_правки.md").exists()
+        or status.get("status") == "needs_review"
+    )
+    if is_draft:
+        candidates = [
+            selected / "ЧЕРНОВИК.md",
+            selected / "НЕГОТОВО_требует_правки.md",
+        ]
+        article = next((path for path in candidates if path.is_file()), None)
+    elif not article.exists():
         article = next(iter(sorted(selected.glob("*_article.md"))), None)
+
     if article is None or not article.is_file():
-        say("Итоговая статья отсутствует. Возможно, запуск прервался.")
-        say("Файлы: " + ", ".join(x.name for x in selected.iterdir()))
+        say("Готовой статьи нет. Запуск мог прерваться.")
+        if status.get("failed_stage"):
+            say("Этап: " + status["failed_stage"])
+        if status.get("error_message"):
+            say("Причина: " + status["error_message"])
+        say("Папка с промежуточными файлами: " + str(selected))
         return
-    option = choose("Готовая статья", ["Прочитать начало", "Повторно в Загрузки", "Показать путь"])
+    title = "Черновик (проверка не пройдена)" if is_draft else "Готовая статья"
+    option = choose(title, [
+        "Прочитать начало",
+        "Выгрузить ЧЕРНОВИК в Загрузки" if is_draft else "Повторно в Загрузки",
+        "Показать путь",
+        "Назад",
+    ])
     if option == 1:
-        console.print(Panel(article.read_text(encoding="utf-8")[:7500], title=article.name))
+        console.print(Panel(article.read_text(encoding="utf-8")[:7500], title=title))
     elif option == 2:
-        topic = (selected / "topic.txt").read_text(encoding="utf-8")
-        result = download_article(article, topic)
-        say(f"Экспорт: {result}" if result else "Папка загрузок недоступна.")
+        if is_draft:
+            say("Внимание: черновик НЕ прошёл редакционную проверку Дзена.")
+            if ask("Выгрузить его вручную? (да/нет)", "нет").lower() != "да":
+                say("Экспорт отменён.")
+                return
+        try:
+            topic = (selected / "topic.txt").read_text(encoding="utf-8")
+        except OSError:
+            topic = "statya"
+        exported = download_article(article, topic, draft=is_draft)
+        say(f"Экспорт: {exported}" if exported else "Папка Загрузки недоступна.")
     elif option == 3:
         say(str(article))
+
+
+def skill_menu(settings: dict) -> None:
+    """Install or toggle a full, locally stored editorial skill."""
+    from .skill_loader import SKILL_DIRECTORY, SKILL_NAME, install_zip, read_skill
+
+    while True:
+        installed = False
+        try:
+            bundle = read_skill()
+            installed = True
+            say(f"\nНавык: {SKILL_NAME} · 7 полных справочников")
+            say(f"Размер исходных текстов: {bundle.size_chars:,} символов")
+            say("Контрольная сумма: " + bundle.digest[:16])
+        except ValueError:
+            say("\nНавык не установлен или его файлы неполны.")
+        enabled = bool(settings["skill"].get("enabled", False))
+        say(f"Применение к статьям Дзена: {'ВКЛ' if enabled else 'ВЫКЛ'}")
+        selection = choose("Методика Никитиной", [
+            "Установить / заменить навык из ZIP в Загрузках",
+            "Включить / выключить применение",
+            "Показать папку и состав",
+            "Назад",
+        ])
+        if selection == 1:
+            candidates = [
+                Path("/sdcard/Download/nikitina-text-full-private.zip"),
+                Path("/sdcard/Download/nikitina-text-restored.zip"),
+                Path("/storage/emulated/0/Download/nikitina-text-full-private.zip"),
+                Path("/storage/emulated/0/Download/nikitina-text-restored.zip"),
+            ]
+            suggested = next((str(p) for p in candidates if p.is_file()), str(candidates[0]))
+            path = ask("Путь к ZIP на телефоне", suggested)
+            try:
+                bundle = install_zip(Path(path))
+                settings["skill"]["enabled"] = True
+                cfg.save(settings)
+                say(f"Установлены полные оригинальные файлы ({bundle.size_chars:,} символов).")
+                say("Навык включён для следующих статей.")
+            except (ValueError, OSError) as error:
+                say(f"Не получилось установить: {error}")
+        elif selection == 2:
+            if not enabled and not installed:
+                say("Сначала установи полный ZIP. Без файлов навык включать нельзя.")
+            else:
+                settings["skill"]["enabled"] = not enabled
+                cfg.save(settings)
+                say("Настройка сохранена.")
+        elif selection == 3:
+            say("Папка в Ubuntu: " + str(SKILL_DIRECTORY))
+            say("Файлы: SKILL.md и все семь Markdown-файлов references/.")
+            say("Справочники не сокращаются и не загружаются в GitHub.")
+        else:
+            return
 
 
 def system_menu(s: dict) -> None:
@@ -567,6 +745,7 @@ def system_menu(s: dict) -> None:
             "Проверить ключ (без генерации)",
             "Копировать настройки в файл JSON",
             "Включить / выключить копию статьи в Загрузках",
+            "Методика Никитиной (ZIP, включение/выключение)",
             "Хранилище (кэш и история)",
             "Вернуть настройки по умолчанию",
             "Назад"])
@@ -602,8 +781,10 @@ def system_menu(s: dict) -> None:
             cfg.save(s)
             say(f"Копия в Загрузки: {'да' if s['download'] else 'нет'}")
         elif pick == 5:
-            cleanup_menu()
+            skill_menu(s)
         elif pick == 6:
+            cleanup_menu()
+        elif pick == 7:
             if ask("Для сброса настроек введи СБРОС") == "СБРОС":
                 s.clear()
                 s.update(cfg.defaults())
@@ -626,7 +807,8 @@ def main() -> None:
                      f"Язык: {s['pipeline']['language']} | "
                      f"поиск: {'вкл' if s['search']['enabled'] else 'выкл'} "
                      f"({s['search']['calls']} запроса) | "
-                     f"редактура: до {s['pipeline']['passes']}")
+                     f"редактура: до {s['pipeline']['passes']} | "
+                     f"навык: {'вкл' if s.get('skill', {}).get('enabled') else 'выкл'}")
             console.print(Panel(title, border_style="cyan"))
             index = choose("Главное меню", [
                 "Написать статью", "Выбрать модели и агентов",

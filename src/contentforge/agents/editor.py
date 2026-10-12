@@ -35,6 +35,7 @@ Output: Return the FULL edited article in Markdown, plus a change summary."""
         self,
         content: str = "",
         seo_recommendations: str = "",
+        editorial_feedback: str = "",
         target_reading_level: str = "general",
         **kwargs,
     ) -> AgentResult:
@@ -43,11 +44,16 @@ Output: Return the FULL edited article in Markdown, plus a change summary."""
         if seo_recommendations:
             seo_block = f"SEO RECOMMENDATIONS TO INCORPORATE:\n{seo_recommendations}\n"
 
+        feedback_block = (
+            "PREVIOUS QUALITY FEEDBACK TO ADDRESS:\n" + editorial_feedback + "\n\n"
+            if editorial_feedback else ""
+        )
+
         prompt = f"""Edit the following article for maximum quality.
 
 Target reading level: {target_reading_level}
 
-{seo_block}
+{seo_block}{feedback_block}
 CONTENT:
 {content}
 

@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from ..core.request_errors import describe_error
 from ..core.config import ContentForgeConfig
 from ..core.mimo_client import ChatMessage, ChatResponse, MiMoClient
 from ..core.token_tracker import TokenTracker
@@ -81,6 +82,17 @@ class BaseAgent(ABC):
                 "and JSON string values. Preserve the required JSON field names, "
                 "code snippets, and technical identifiers."
             )
+        if self.config.pipeline.editorial_profile == "dzen":
+            from ..dzen_editorial import stage_guidance
+
+            p = self.config.pipeline
+            system_content += "\n\n" + stage_guidance(
+                self.name, p.min_chars, p.target_chars, p.max_chars, p.title_max_chars
+            )
+        if self.config.pipeline.editorial_profile == "dzen":
+            skill_context = self.config._skill_texts.get(self.name, "")
+            if skill_context:
+                system_content += "\n\n" + skill_context
         messages = [ChatMessage(role="system", content=system_content)]
 
         if context:
@@ -89,6 +101,21 @@ class BaseAgent(ABC):
         if self._agent_config.user_prompt_addition:
             user_prompt += "\n\nДополнительные инструкции редакционного профиля:\n" + (
                 self._agent_config.user_prompt_addition
+            )
+        if (
+            self.config.pipeline.editorial_profile == "dzen"
+            and self.config._article_brief
+            and self.name in {"outline", "writer", "seo", "editor", "quality", "publisher"}
+        ):
+            # Always retain the user's exact request. An outline is a proposed
+            # structure, not permission to silently change an article's genre.
+            user_prompt += (
+                "\n\nИЗНАЧАЛЬНОЕ ЗАДАНИЕ АВТОРА (обязательно сохранить цель):\n"
+                + self.config._article_brief
+                + "\n\nНельзя подменять запрошенный жанр другим. Если заказан "
+                "обзор и сравнение конкретных решений, нужны их реальные "
+                "различия, преимущества и недостатки. Чек-лист можно добавить "
+                "только как дополнение, а не вместо сравнения. Факты не выдумывай."
             )
         messages.append(ChatMessage(role="user", content=user_prompt))
 
@@ -122,7 +149,7 @@ class BaseAgent(ABC):
                 latency_ms=latency,
                 errors=1,
             )
-            logger.error(f"Agent {self.name} MiMo call failed: {e}")
+            logger.error("Агент %s: %s", self.name, describe_error(e, timeout=self.config.llm.timeout))
             raise
 
     @abstractmethod
@@ -143,9 +170,9 @@ class BaseAgent(ABC):
             )
             return result
         except Exception as e:
-            logger.error(f"[{self.name}] Failed: {e}")
+            logger.error("[%s] Failed: %s", self.name, describe_error(e, timeout=self.config.llm.timeout))
             return AgentResult(
                 agent_name=self.name,
                 status="failed",
-                error=str(e),
+                error=describe_error(e, timeout=self.config.llm.timeout),
             )

@@ -19,3 +19,6 @@ output/
 benchmark_results.json
 contentforge.yaml
 .env
+
+# User-owned, potentially licensed editorial skill assets
+skills/

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 # Provider presets: base_url, auth header style, default model, and the env
 # vars used to populate api_key / base_url when they aren't set explicitly.
@@ -141,6 +141,11 @@ class PipelineConfig(BaseModel):
 
     topic: str = ""
     target_word_count: int = 2000
+    editorial_profile: str = "general"
+    min_chars: int = 4000
+    target_chars: int = 6000
+    max_chars: int = 8000
+    title_max_chars: int = 147
     language: str = "en"
     output_format: str = "markdown"
     seo_enabled: bool = True
@@ -173,6 +178,11 @@ class ContentForgeConfig(BaseModel):
     log_level: str = "INFO"
     output_dir: str = "./output"
     cache_dir: str = "./.cache"
+
+    # Private run-only context: never serialized to YAML or run settings.
+    _skill_texts: dict[str, str] = PrivateAttr(default_factory=dict)
+    _skill_digest: str = PrivateAttr(default="")
+    _article_brief: str = PrivateAttr(default="")
 
     @model_validator(mode="before")
     @classmethod
