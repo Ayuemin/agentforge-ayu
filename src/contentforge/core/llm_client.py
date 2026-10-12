@@ -136,9 +136,17 @@ class LLMClient:
                     resp.raise_for_status()
                     data = resp.json()
                     break
-            except (httpx.HTTPStatusError, httpx.ConnectError) as e:
-                logger.warning(f"LLM API attempt {attempt + 1} failed: {e}")
-                if attempt < self.config.max_retries - 1:
+            except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                from .request_errors import describe_error
+
+                code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+                retryable = code is None or code in {408, 429, 500, 502, 503, 504}
+                logger.warning(
+                    "OpenRouter попытка %s/%s: %s",
+                    attempt + 1, self.config.max_retries,
+                    describe_error(e, timeout=self.config.timeout),
+                )
+                if retryable and attempt < self.config.max_retries - 1:
                     await asyncio.sleep(self.config.retry_delay * (2**attempt))
                 else:
                     raise
