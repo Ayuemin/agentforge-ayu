@@ -141,6 +141,11 @@ class PipelineConfig(BaseModel):
 
     topic: str = ""
     target_word_count: int = 2000
+    editorial_profile: str = "general"
+    min_chars: int = 4000
+    target_chars: int = 6000
+    max_chars: int = 8000
+    title_max_chars: int = 147
     language: str = "en"
     output_format: str = "markdown"
     seo_enabled: bool = True
