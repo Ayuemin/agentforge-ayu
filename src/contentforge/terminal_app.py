@@ -425,7 +425,7 @@ def clean_article(value: str) -> str:
     return value.strip() + "\n"
 
 
-def download_article(article: Path, topic: str) -> Path | None:
+def download_article(article: Path, topic: str, *, draft: bool = False) -> Path | None:
     """Copy without modifying the Linux original."""
     name = re.sub(r"[^\wа-яА-Я-]+", "_", topic, flags=re.UNICODE).strip("_")[:48]
     name = name or "statya"
@@ -436,7 +436,8 @@ def download_article(article: Path, topic: str) -> Path | None:
         Path("/data/data/com.termux/files/home/storage/downloads"),
     ):
         if folder.is_dir():
-            dest = folder / (f"AgentForge_{stamp}_{name}.md")
+            label = "AgentForge_ЧЕРНОВИК" if draft else "AgentForge"
+            dest = folder / (f"{label}_{stamp}_{name}.md")
             try:
                 shutil.copyfile(article, dest)
                 return dest
@@ -548,17 +549,40 @@ def run_article(s: dict) -> None:
         logger.setLevel(previous_level)
 
     if result.status == "needs_review":
-        say("Статья пока НЕ ГОТОВА для Дзена: после редакторских проходов "
-            "остались замечания по объёму или качеству.")
-        if result.editorial_audit.get("issues"):
-            for issue in result.editorial_audit["issues"]:
-                say("• " + issue)
-        say("Черновик и отчёты сохранены в Linux, в Android Загрузки он не копируется.")
-        say(str(folder))
+        from .article_format import format_article
+
+        draft_path = folder / "ЧЕРНОВИК.md"
+        draft_text = clean_article(result.article)
+        draft_text, remaining_tables = format_article(
+            draft_text, allow_tables=s["pipeline"].get("allow_tables", False)
+        )
+        draft_path.write_text(draft_text, encoding="utf-8")
+        say("Статья написана, но редакционная проверка ещё не пройдена.")
+        say(f"Оценка качества: {result.quality_score:g} из 100; "
+            f"нужно минимум {s['pipeline']['quality'] * 100:g}.")
+        say(f"Объём: {result.editorial_audit.get('body_chars', 'не определён')} знаков "
+            f"(норма {s['pipeline']['min_chars']}–{s['pipeline']['max_chars']}).")
+        for issue in result.editorial_audit.get("issues", []):
+            say("• " + issue)
+        if result.editorial_audit.get("quality_parse_error"):
+            say("• " + result.editorial_audit["quality_parse_error"])
+        if remaining_tables:
+            say("• В черновике осталась нестандартная таблица.")
+        say(f"Полный черновик сохранён: {draft_path}")
+        if s.get("download", True):
+            exported = download_article(draft_path, topic, draft=True)
+            say(f"Android Загрузки (ЧЕРНОВИК): {exported}" if exported
+                else "Не удалось скопировать черновик в Загрузки Android.")
+        say("Черновик не помечен как готовый к публикации.")
         return
     if not result.ok:
-        say("Конвейер завершился с ошибкой. Уже созданные файлы сохранены:")
-        say(str(folder))
+        say("Конвейер завершился с ошибкой.")
+        if result.failed_stage:
+            say(f"Проблемный этап: {result.failed_stage}")
+        if result.error_message:
+            say(f"Причина: {result.error_message}")
+        say(f"Файлы диагностики: {folder / 'run_status.json'}")
+        say("Созданные ранее промежуточные тексты не удалены.")
         return
 
     from .article_format import format_article
