@@ -212,12 +212,19 @@ class PipelineOrchestrator:
                         audit = article_audit(
                             current_content, p.min_chars, p.max_chars, p.title_max_chars
                         )
+                        audit["quality_score"] = quality_score
+                        audit["quality_threshold"] = threshold
+                        audit["quality_parse_error"] = (
+                            quality_result.metadata.get("score_parse_error", "")
+                        )
                         result.editorial_audit = audit
                         snapshot("07_dzen_audit.json", json.dumps(
                             audit, ensure_ascii=False, indent=2
                         ))
                         audit_ok = audit["passed"]
                         messages = list(audit["issues"])
+                        if audit["quality_parse_error"]:
+                            messages.append(audit["quality_parse_error"])
                         try:
                             reviewed = json.loads(quality_result.content)
                             if isinstance(reviewed, dict):
