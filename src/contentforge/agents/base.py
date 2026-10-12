@@ -81,6 +81,13 @@ class BaseAgent(ABC):
                 "and JSON string values. Preserve the required JSON field names, "
                 "code snippets, and technical identifiers."
             )
+        if self.config.pipeline.editorial_profile == "dzen":
+            from ..dzen_editorial import stage_guidance
+
+            p = self.config.pipeline
+            system_content += "\n\n" + stage_guidance(
+                self.name, p.min_chars, p.target_chars, p.max_chars, p.title_max_chars
+            )
         messages = [ChatMessage(role="system", content=system_content)]
 
         if context:
