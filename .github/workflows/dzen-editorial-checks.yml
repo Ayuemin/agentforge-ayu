@@ -1,0 +1,25 @@
+name: Dzen Editorial Regression Tests
+
+on:
+  push:
+    branches: [work/dzen-editorial-v1]
+  pull_request:
+    branches: [main]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install project and test tools
+        run: python -m pip install -e '.[dev]'
+      - name: Verify syntax
+        run: python -m compileall -q src/contentforge tests/unit/test_dzen_editorial.py
+      - name: Run original and Dzen regression tests (offline)
+        run: pytest -q tests/unit/test_dzen_editorial.py tests/unit/test_agents.py tests/integration/test_pipeline.py tests/unit/test_terminal_app.py tests/unit/test_article_format.py
