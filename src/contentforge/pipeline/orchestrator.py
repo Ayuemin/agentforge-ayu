@@ -229,7 +229,7 @@ class PipelineOrchestrator:
                         )
 
                 result.article = current_content
-                if dzen_mode and not result.editorial_audit.get("passed", False):
+                if dzen_mode and (not result.editorial_audit.get("passed", False) or quality_score < threshold):
                     result.status = "needs_review"
                     snapshot("НЕГОТОВО_требует_правки.md", current_content)
 
