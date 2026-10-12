@@ -102,6 +102,21 @@ class BaseAgent(ABC):
             user_prompt += "\n\nДополнительные инструкции редакционного профиля:\n" + (
                 self._agent_config.user_prompt_addition
             )
+        if (
+            self.config.pipeline.editorial_profile == "dzen"
+            and self.config._article_brief
+            and self.name in {"outline", "writer", "seo", "editor", "quality", "publisher"}
+        ):
+            # Always retain the user's exact request. An outline is a proposed
+            # structure, not permission to silently change an article's genre.
+            user_prompt += (
+                "\n\nИЗНАЧАЛЬНОЕ ЗАДАНИЕ АВТОРА (обязательно сохранить цель):\n"
+                + self.config._article_brief
+                + "\n\nНельзя подменять запрошенный жанр другим. Если заказан "
+                "обзор и сравнение конкретных решений, нужны их реальные "
+                "различия, преимущества и недостатки. Чек-лист можно добавить "
+                "только как дополнение, а не вместо сравнения. Факты не выдумывай."
+            )
         messages.append(ChatMessage(role="user", content=user_prompt))
 
         start = time.monotonic()
