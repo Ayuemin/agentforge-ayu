@@ -95,6 +95,10 @@ class PipelineOrchestrator:
     async def run(self, topic: str, *, research_context: str = "", **kwargs) -> PipelineResult:
         """Execute the full pipeline for a given topic."""
         result = PipelineResult()
+        if self.config.pipeline.editorial_profile == "dzen":
+            # The human's original brief must survive Research/Outline
+            # transformations and every Editor/Quality retry.
+            self.config._article_brief = topic
 
         self.tracker.start_pipeline()
         steps = Path(self.config.output_dir)
@@ -189,10 +193,14 @@ class PipelineOrchestrator:
                     quality_agent = get_agent(
                         "quality", config=self.config, client=client, tracker=self.tracker
                     )
+                    published_title = next(
+                        (line[2:].strip() for line in current_content.splitlines()
+                         if line.startswith("# ") and line[2:].strip()), topic
+                    )
                     quality_result = await quality_agent.run(
                         content=current_content,
                         threshold=self.config.pipeline.quality_threshold,
-                        title=topic,
+                        title=published_title if dzen_mode else topic,
                     )
                     result.agent_results["quality"] = quality_result
                     result.quality_report = quality_result.content
@@ -276,7 +284,11 @@ class PipelineOrchestrator:
                 )
                 publisher_result = await publisher_agent.run(
                     content=current_content,
-                    title=topic,
+                    title=(
+                        next((line[2:].strip() for line in current_content.splitlines()
+                              if line.startswith("# ") and line[2:].strip()), topic)
+                        if dzen_mode else topic
+                    ),
                     publish_targets=self.config.pipeline.publish_targets,
                     output_dir=self.config.output_dir,
                 )
