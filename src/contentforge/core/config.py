@@ -182,6 +182,7 @@ class ContentForgeConfig(BaseModel):
     # Private run-only context: never serialized to YAML or run settings.
     _skill_texts: dict[str, str] = PrivateAttr(default_factory=dict)
     _skill_digest: str = PrivateAttr(default="")
+    _article_brief: str = PrivateAttr(default="")
 
     @model_validator(mode="before")
     @classmethod
