@@ -32,7 +32,7 @@ Output format (JSON):
 
 Be thorough but concise. Prioritize recent (2024-2026) data."""
 
-    async def execute(self, topic: str = "", **kwargs) -> AgentResult:
+    async def execute(self, topic: str = "", source_context: str = "", **kwargs) -> AgentResult:
         """Research a given topic and return structured findings."""
         prompt = f"""Research the following topic thoroughly:
 
@@ -47,7 +47,7 @@ Provide:
 
 Return as structured JSON."""
 
-        response = await self._call_mimo(prompt)
+        response = await self._call_mimo(prompt, context=source_context)
 
         return AgentResult(
             agent_name=self.name,
