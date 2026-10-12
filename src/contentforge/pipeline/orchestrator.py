@@ -250,9 +250,18 @@ class PipelineOrchestrator:
                         )
                         break
                     elif iteration < self.config.pipeline.max_iterations - 1:
+                        reasons = []
+                        if quality_score < threshold:
+                            reasons.append(f"оценка {quality_score} < {threshold}")
+                        if not audit_ok:
+                            reasons.append(
+                                "проверка объёма или заголовка: "
+                                + "; ".join(str(issue) for issue in messages[:2])
+                            )
                         logger.info(
-                            f"[Pipeline] Quality score {quality_score} < {threshold}, "
-                            f"re-editing (iteration {iteration + 2})"
+                            "[Pipeline] Нужна правка ("
+                            + (" | ".join(reasons) or "причина не определена")
+                            + f"), re-editing (iteration {iteration + 2})"
                         )
 
                 result.article = current_content

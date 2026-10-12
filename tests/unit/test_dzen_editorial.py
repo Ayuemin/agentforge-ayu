@@ -123,6 +123,49 @@ async def test_length_feedback_reaches_editor_and_incomplete_article_not_exporte
 
 
 @pytest.mark.asyncio
+async def test_re_edit_reason_names_audit_not_score_when_score_passes(tmp_path, caplog):
+    """Regression: an over-long article re-edits with a truthful reason.
+
+    The quality score is above the threshold, so the log must blame the
+    deterministic length audit instead of falsely claiming the score failed.
+    """
+    import logging
+
+    config = ContentForgeConfig(
+        llm=LLMConfig(provider="openrouter", model="xiaomi/mimo-v2.5-pro", api_key="test"),
+        pipeline=PipelineConfig(editorial_profile="dzen", language="ru",
+                                max_iterations=2, quality_threshold=0.8),
+        output_dir=str(tmp_path),
+    )
+    too_long = "# Заголовок\n\n" + "Полезная информация для читателя. " * 500
+    responses = [
+        _reply('{"key_subtopics": []}'),
+        _reply('{"sections": []}'),
+        _reply(too_long),
+        _reply('{"seo_score": 80}'),
+        _reply(too_long),
+        _reply('{"overall_score": 90}'),
+        _reply(too_long),
+        _reply('{"overall_score": 90}'),
+        _reply('{"metadata": {}}'),
+    ]
+    mock = AsyncMock()
+    mock.chat = AsyncMock(side_effect=responses)
+    mock.__aenter__ = AsyncMock(return_value=mock)
+    mock.__aexit__ = AsyncMock(return_value=None)
+    caplog.set_level(logging.INFO, logger="contentforge.pipeline.orchestrator")
+    with patch("contentforge.pipeline.orchestrator.MiMoClient", return_value=mock):
+        result = await PipelineOrchestrator(config).run("test")
+
+    messages = [record.getMessage() for record in caplog.records]
+    re_edit = [m for m in messages if "re-editing" in m]
+    assert re_edit, messages
+    assert any("проверка объёма или заголовка" in m for m in re_edit)
+    assert all("оценка" not in m for m in re_edit)
+    assert result.editorial_audit["passed"] is False
+
+
+@pytest.mark.asyncio
 async def test_fitting_article_keeps_original_one_pass_exit(tmp_path):
     config = ContentForgeConfig(
         llm=LLMConfig(api_key="test"),

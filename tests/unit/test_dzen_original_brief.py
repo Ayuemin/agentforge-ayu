@@ -30,6 +30,17 @@ def test_stage_guidance_keeps_comparative_coverage_and_factual_guardrails():
     assert "восстанови сравнение" in editor
     assert "исходное задание" in quality
     assert "Нельзя выдумывать" in writer
+    # The outline must pick comparison/listicle for a comparison brief,
+    # the writer must let the brief win over the outline, and Quality must
+    # score incompleteness below the acceptance threshold.
+    assert "content_type определяй строго по исходному заданию" in outline
+    assert "ставь comparison или listicle" in outline
+    assert "Исходное задание важнее плана" in writer
+    assert "ниже порога приёмки" in quality
+    # Editor must be told the maximum is a hard cap so an over-long draft is
+    # shortened instead of growing on the next pass.
+    assert "Жёсткий максимум — 8000" in editor
+    assert "повторный проход не должен увеличивать объём" in editor
 
 
 @pytest.mark.asyncio
