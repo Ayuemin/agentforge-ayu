@@ -609,6 +609,7 @@ def run_article(s: dict) -> None:
 
 
 def recent_menu(s: dict) -> None:
+    """Show both completed articles and clearly labeled unfinished drafts."""
     cfg.RUNS.mkdir(parents=True, exist_ok=True)
     dirs = sorted((p for p in cfg.RUNS.iterdir() if p.is_dir()), reverse=True)[:30]
     if not dirs:
@@ -620,25 +621,65 @@ def recent_menu(s: dict) -> None:
             topic = (path / "topic.txt").read_text(encoding="utf-8").strip()
         except OSError:
             topic = "неизвестное задание"
-        names.append(f"{path.name[:15]} · {topic[:45]}")
+        is_draft = (
+            (path / "ЧЕРНОВИК.md").exists()
+            or (path / "НЕГОТОВО_требует_правки.md").exists()
+        )
+        label = "ЧЕРНОВИК · " if is_draft else ""
+        names.append(f"{label}{path.name[:15]} · {topic[:45]}")
     choice = choose("Последние запуски", names + ["Назад"])
     if not choice or choice > len(dirs):
         return
     selected = dirs[choice - 1]
+    status_file = selected / "run_status.json"
+    try:
+        status = json.loads(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        status = {}
     article = selected / "СТАТЬЯ.md"
-    if not article.exists():
+    is_draft = bool(
+        (selected / "ЧЕРНОВИК.md").exists()
+        or (selected / "НЕГОТОВО_требует_правки.md").exists()
+        or status.get("status") == "needs_review"
+    )
+    if is_draft:
+        candidates = [
+            selected / "ЧЕРНОВИК.md",
+            selected / "НЕГОТОВО_требует_правки.md",
+        ]
+        article = next((path for path in candidates if path.is_file()), None)
+    elif not article.exists():
         article = next(iter(sorted(selected.glob("*_article.md"))), None)
+
     if article is None or not article.is_file():
-        say("Итоговая статья отсутствует. Возможно, запуск прервался.")
-        say("Файлы: " + ", ".join(x.name for x in selected.iterdir()))
+        say("Готовой статьи нет. Запуск мог прерваться.")
+        if status.get("failed_stage"):
+            say("Этап: " + status["failed_stage"])
+        if status.get("error_message"):
+            say("Причина: " + status["error_message"])
+        say("Папка с промежуточными файлами: " + str(selected))
         return
-    option = choose("Готовая статья", ["Прочитать начало", "Повторно в Загрузки", "Показать путь"])
+    title = "Черновик (проверка не пройдена)" if is_draft else "Готовая статья"
+    option = choose(title, [
+        "Прочитать начало",
+        "Выгрузить ЧЕРНОВИК в Загрузки" if is_draft else "Повторно в Загрузки",
+        "Показать путь",
+        "Назад",
+    ])
     if option == 1:
-        console.print(Panel(article.read_text(encoding="utf-8")[:7500], title=article.name))
+        console.print(Panel(article.read_text(encoding="utf-8")[:7500], title=title))
     elif option == 2:
-        topic = (selected / "topic.txt").read_text(encoding="utf-8")
-        result = download_article(article, topic)
-        say(f"Экспорт: {result}" if result else "Папка загрузок недоступна.")
+        if is_draft:
+            say("Внимание: черновик НЕ прошёл редакционную проверку Дзена.")
+            if ask("Выгрузить его вручную? (да/нет)", "нет").lower() != "да":
+                say("Экспорт отменён.")
+                return
+        try:
+            topic = (selected / "topic.txt").read_text(encoding="utf-8")
+        except OSError:
+            topic = "statya"
+        exported = download_article(article, topic, draft=is_draft)
+        say(f"Экспорт: {exported}" if exported else "Папка Загрузки недоступна.")
     elif option == 3:
         say(str(article))
 
